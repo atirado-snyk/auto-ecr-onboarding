@@ -63,3 +63,6 @@ the UI.
 (docs/TESTING.md): connectivity with the UI-prescribed principal, the connection test and its propagation
 retry, Regex sync importing exactly the matching tag, and teardown of everything the product created.
 Repeated with an org-level service account (access token, Org Admin). OAuth 2.0 service accounts (bearer tokens) are not supported yet.
+
+## License
+MIT. See [LICENSE](LICENSE).
