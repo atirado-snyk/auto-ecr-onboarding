@@ -38,12 +38,18 @@ with one of Snyk's types (`ImportAll`, `ImportAllNew`, `Regex`, `Recent`, `LastN
 fields, or `--policy-file` with Snyk's policy JSON. There is no default; `--no-sync` connects only.
 Re-running is safe.
 
-## Teardown
-`onboard_ecr.py teardown` (dry run unless `--yes`) removes the sync policy and, with flags, the imported
-projects (`--delete-projects --repo-prefix`) and the integration's stored credentials
-(`--delete-credentials`, which disconnects Snyk); `terraform destroy` removes the role. The org and the
-registry are never touched. The empty integration entry has no delete API and can only be removed in
-the UI.
+## Lifecycle
+- **Set up once:** `terraform apply` for the role, then `onboard_ecr.py apply` for the connection and the
+  sync policy.
+- **Then nothing runs on your side:** Snyk syncs the registry on its schedule (new matching images become
+  projects) and retests imported images, so new vulnerabilities show up without anyone acting.
+  Re-run `apply` only to change the policy; `status` shows what is there.
+- **Pause:** `onboard_ecr.py teardown --yes` removes only the sync policy; `apply` resumes it.
+- **Stop for good:** `onboard_ecr.py teardown` (dry run unless `--yes`) with `--delete-projects --repo-prefix`
+  and `--delete-credentials`, then `terraform destroy`. The org and the registry are never touched; the empty
+  integration entry has no delete API and can only be removed in the UI.
+
+Set it up with a service account, not a personal token (see [Running it over time](docs/USAGE.md#running-it-over-time)).
 
 ## Documentation
 - [docs/USAGE.md](docs/USAGE.md): step by step, prerequisites, permissions, constraints, security notes,

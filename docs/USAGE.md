@@ -194,10 +194,31 @@ every project in the org with its origin.
 
 Exit codes: `0` success, `1` error, `2` apply refused by `--max-images`.
 
+## Running it over time
+
+You run the tool when something changes: to set up, to change the policy, and to stop. Between those
+times nothing of this tool runs. There is no Lambda, scheduled job or daemon; Snyk does the ongoing work.
+
+| When | What happens | What you do |
+|---|---|---|
+| **Set up** (once) | The role, the integration and the sync policy are created; the first sync starts immediately. | Steps 1 to 3 above. |
+| **Every day after** | Snyk's registry sync runs every `schedule_frequency_hours` (default 24): newly pushed images that match the policy become projects, and with `delete_images` projects whose images no longer match are removed. Snyk also retests imported images on its own schedule ([Snyk: rescans imported images daily](https://docs.snyk.io/implementation-guides/enterprise-implementation-guide/create-a-template-organization/connect-your-development-tools)), so newly disclosed vulnerabilities appear without anyone acting; alerts follow the org's notification settings. | Nothing. Look at the results in Snyk, or run `status`. |
+| **When needs change** | | Re-run `apply` with a different policy (it replaces the current one). After a role or region change, `apply --update-credentials`. If Snyk changes its principal, `terraform apply` with the new value. |
+| **To pause** | No new images are imported; the connection and the existing projects stay. | `teardown --yes` (removes only the sync policy). Resume later with `apply`. |
+| **To stop for good** | Everything the tool set up is removed; the Snyk org and the registry are untouched. | [Teardown](#teardown), then `terraform destroy`. |
+
+**Which identity sets it up.** Snyk's documentation does not say whether the scheduled sync depends on the
+token that applied the policy. Use a service account, not a personal token: Snyk recommends service
+accounts for any automation, so that it keeps working when people change roles or leave
+([Snyk: Authentication for API](https://docs.snyk.io/developer-tools/snyk-api/authentication-for-api)).
+Track the token's expiry: a service account access token lasts at most one year, a personal access
+token at most 90 days ([Snyk: service account types](https://docs.snyk.io/platform-administration/service-accounts/choose-a-service-account-type-to-use-with-snyk-apis)).
+
 ## Teardown
 
 Removes what `apply` and Terraform created, in order: stop the sync, remove the projects it
-imported, disconnect, then remove the role.
+imported, disconnect, then remove the role. To only pause the sync, run `teardown --yes` without the
+other flags: it removes just the sync policy, and `apply` resumes it.
 
 ```bash
 # 1. dry run: shows exactly what would be removed
