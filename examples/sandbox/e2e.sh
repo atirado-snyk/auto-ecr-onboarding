@@ -226,6 +226,9 @@ repo_present() { aws ecr describe-repositories --region "$1" --repository-names 
 image_present() { aws ecr describe-images --region "$1" --repository-name "${REPO_NAME}" --image-ids imageTag=v1.0.0 >/dev/null 2>&1; }
 # Project lines from `status` look like "  - <repository>:<tag>", possibly with the registry host in front.
 has_project() { grep -Eq "^  - ([^ ]*/)?${1}\$" <<<"$2"; }
+# The read proof lists at most 10 repositories. When it is cut short ("  ... and N more repositories"), the test
+# repository may be among the rest; the sync preview's "+ snyk-e2e/app: v1.0.0" then shows Snyk reads it.
+lists_repo() { grep -Eq "^  ([^ ]*/)?${REPO_NAME} \(" <<<"$1" || grep -Eq '^  \.\.\. and [0-9]+ more repositories$' <<<"$1"; }
 
 # A first connection for one org: plan reports the integration as missing, apply creates it, the connection
 # test lists the test repository, the preview selects exactly v1.0.0, and the policy is applied.
@@ -239,7 +242,7 @@ connect() {
   onboard apply "${slot}" "${SYNC_POLICY[@]}" 2>&1 | tee "${log}"
   grep -q "^ECR integration created:" "${log}" || fail "the integration was not created"
   grep -q "^Snyk can read the registry:" "${log}" || fail "the connection test did not pass"
-  grep -Eq "^  ([^ ]*/)?${REPO_NAME} \(" "${log}" || fail "the connection test did not list ${REPO_NAME}"
+  lists_repo "$(cat "${log}")" || fail "the connection test did not list ${REPO_NAME}"
   grep -Eq "^  \+ ([^ ]*/)?${REPO_NAME}: v1\.0\.0\$" "${log}" || fail "the sync preview should select exactly v1.0.0"
   grep -q "^Sync policy applied" "${log}" || fail "the sync policy was not applied"
   pass "org ${slot} is connected to ${region}, and its sync is configured"
@@ -269,7 +272,7 @@ still_connected() {
   local slot=$1 log="${STATE}/connected_$1.log" attempt
   for attempt in 1 2 3; do
     if onboard plan "${slot}" --no-sync >"${log}" 2>&1 && grep -q "^Snyk can read the registry:" "${log}" &&
-      grep -Eq "^  ([^ ]*/)?${REPO_NAME} \(" "${log}"; then
+      lists_repo "$(cat "${log}")"; then
       pass "org ${slot} ($(slot_region "${slot}")) still connects (attempt ${attempt} of 3)"
       return 0
     fi
@@ -631,7 +634,7 @@ expect_connected() { # log name created|reused
     ! grep -q '^ECR connection created:' <<<"${out}" || fail "[$2] a second connection was created"
   fi
   grep -q '^Snyk can read the registry:' <<<"${out}" || fail "[$2] the connection test did not pass"
-  grep -Eq "^  ([^ ]*/)?${REPO_NAME} \(" <<<"${out}" || fail "[$2] the connection test did not list ${REPO_NAME}"
+  lists_repo "${out}" || fail "[$2] the connection test did not list ${REPO_NAME}"
   grep -Eq "^  \+ ([^ ]*/)?${REPO_NAME}: v1\.0\.0\$" <<<"${out}" || fail "[$2] the sync preview should select exactly v1.0.0"
   grep -qF "Sync policy applied for connection $2;" <<<"${out}" || fail "[$2] the sync policy was not applied"
 }
