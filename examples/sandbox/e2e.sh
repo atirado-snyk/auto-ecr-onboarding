@@ -7,7 +7,10 @@
 #   Snyk: SNYK_TOKEN allowed to create and delete orgs in SNYK_GROUP_ID (list: uv run harness.py groups);
 #         SNYK_AWS_PRINCIPAL, the Principal from the trust policy your tenant shows under
 #         Integrations > Amazon ECR; SNYK_API_BASE for non-US tenants
-#   Tools: terraform, aws, docker (running), jq, uv
+#   Tools: terraform, aws, jq, uv; docker (running) is optional: without it, infra-up copies the test image with
+#          push_image.py over the registry API
+#   Profiles mode (./e2e.sh profiles): E2E_PROFILE_ORG_ID, an existing org with Snyk's multiple profiles feature
+#         on and no ECR connection. It is never created or deleted; only the connections the step makes go.
 #
 # Two layers, each removing exactly what it created:
 #   test infrastructure (this harness): throwaway Snyk orgs (ecr-e2e-*) and an ECR repo with a test image in
@@ -27,14 +30,20 @@
 #   ./e2e.sh full     infra-up, preflight, new, add-region, status, [pause], retire-region, down, multi, status,
 #                     down, postcheck, infra-down, final
 #   ./e2e.sh single   infra-up, preflight, new, status, [pause], down, postcheck, infra-down, final (org a only)
+#   ./e2e.sh profiles infra-up, profiles-preflight, profiles-new, profiles-scenario, profiles-down, infra-down,
+#                     profiles-final: several connections in one org (feature 002; quickstart.md section 3)
 #   ./e2e.sh <step>   one step: infra-up | preflight | new | add-region | status | retire-region | down | multi |
-#                     postcheck | infra-down | final
+#                     postcheck | infra-down | final | profiles-preflight | profiles-new | profiles-scenario |
+#                     profiles-down | profiles-final
 #
 # Options: E2E_SLOTS which orgs infra-up creates (default "a b n c d"; single uses "a");
 #   E2E_ORG_ID=<uuid> use an existing org as org a instead of creating one (single only; it is never deleted
 #   and must have no ECR integration); E2E_PAUSE=0 skip the pause; E2E_ASSUME_YES=1 skip confirmations;
 #   VERIFY_TIMEOUT seconds to wait for each sync (default 600); FINAL_TIMEOUT seconds to wait for the org
-#   deletions to show (default 180).
+#   deletions to show (default 180); E2E_POLL_SECONDS seconds between status checks while waiting (default 60).
+# Snyk's closed-beta APIs allow 1 call a second, 10 a minute, and 100 an hour per token, and every run of the tool
+# makes at least one (its mode check). The steps keep count in .e2e/closed_beta.log, warn above 80 in the last
+# hour, and stop above 100; the profiles steps space their runs at least 6 seconds apart.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -53,6 +62,11 @@ VERIFY_TIMEOUT="${VERIFY_TIMEOUT:-600}"
 FINAL_TIMEOUT="${FINAL_TIMEOUT:-180}"
 ONBOARD=(uv run ../../scripts/onboard_ecr.py)
 HARNESS=(uv run harness.py)
+PUSH_IMAGE=(uv run push_image.py)
+POLL_SECONDS="${E2E_POLL_SECONDS:-60}"
+CB_LOG="${STATE}/closed_beta.log"
+PROFILE_ORG="${E2E_PROFILE_ORG_ID:-}"
+LABEL_B="e2e-b" # the label of the profiles step's second connection
 FIXTURE_VARS=(-var "region_a=${REGION_A}" -var "region_b=${REGION_B}" -var "repository_name=${REPO_NAME}")
 PLACEHOLDER_ORG="00000000-0000-0000-0000-000000000000" # destroy only needs well-formed inputs
 # What `terraform plan` may contain: a new role, or an in-place update of its trust policy and nothing else.
@@ -84,6 +98,9 @@ leftovers() {
       echo "confirmation that the throwaway org $(cat "${STATE}/org_${slot}.deleted") is gone (./e2e.sh final re-checks)"
     fi
   done
+  if [[ -f "${STATE}/profiles_started" ]]; then
+    echo "connections the profiles step made in org ${PROFILE_ORG:-<E2E_PROFILE_ORG_ID>} (./e2e.sh profiles-down)"
+  fi
   if grep -qs '"mode": "managed"' fixture/terraform.tfstate; then
     echo "the test ECR repositories ${REPO_NAME} in ${REGION_A} and ${REGION_B} (./e2e.sh infra-down)"
   fi
@@ -102,7 +119,18 @@ fi' EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "PASS: $*"; }
-step() { STARTED=1; echo; echo "=== $* ==="; }
+step() { STARTED=1; cb_check; echo; echo "=== $* ==="; }
+# Snyk's closed-beta allowance: one line per tool run, "<epoch seconds> <calls>"; a run without a count line
+# (default mode) made one call, its mode check.
+cb_add() { mkdir -p "${STATE}"; echo "$(date +%s) ${1:-1}" >>"${CB_LOG}"; }
+cb_hour() { awk -v since=$(($(date +%s) - 3600)) '$1 >= since { n += $2 } END { print n + 0 }' "${CB_LOG}" 2>/dev/null || echo 0; }
+cb_check() {
+  local n
+  n="$(cb_hour)"
+  if ((n > 100)); then fail "${n} closed-beta calls in the last hour, above Snyk's 100: wait before the next step"; fi
+  if ((n > 80)); then echo "warning: ${n} closed-beta calls in the last hour; Snyk allows 100" >&2; fi
+}
+cb_report() { echo "closed-beta calls by this e2e in the last hour: $(cb_hour) (Snyk allows 100)"; }
 confirm() {
   if [[ "${E2E_ASSUME_YES:-0}" == "1" ]]; then return 0; fi
   read -r -p "$1 [y/N] " ok
@@ -182,10 +210,11 @@ role_present() { aws iam get-role --role-name "${ROLE_NAME}" >/dev/null 2>&1; }
 onboard() { # mode slot [flags...]
   local mode=$1 slot=$2
   shift 2
+  cb_add 1
   "${ONBOARD[@]}" "${mode}" --org-id "$(org_of "${slot}")" --region "$(slot_region "${slot}")" --role-arn "$(role_arn)" "$@"
 }
-snyk_status() { local slot=$1; shift; "${ONBOARD[@]}" status --org-id "$(org_of "${slot}")" "$@"; }
-teardown() { local slot=$1; shift; "${ONBOARD[@]}" teardown --org-id "$(org_of "${slot}")" "$@"; }
+snyk_status() { local slot=$1; shift; cb_add 1; "${ONBOARD[@]}" status --org-id "$(org_of "${slot}")" "$@"; }
+teardown() { local slot=$1; shift; cb_add 1; "${ONBOARD[@]}" teardown --org-id "$(org_of "${slot}")" "$@"; }
 org_exists_rc() { local rc=0; "${HARNESS[@]}" org-exists --org-id "$1" || rc=$?; echo "${rc}"; }
 org_listed_rc() {
   if [[ -z "${SNYK_GROUP_ID:-}" ]]; then echo 2; return 0; fi
@@ -227,8 +256,8 @@ verify_import() {
       pass "org ${slot}: the sync imported v1.0.0 only"
       return 0
     fi
-    echo "  not imported yet; checking again in 20s"
-    sleep 20
+    echo "  not imported yet; checking again in ${POLL_SECONDS}s"
+    sleep "${POLL_SECONDS}"
   done
   echo "${status}"
   echo "diagnostic: every project in the org with its origin"
@@ -267,7 +296,8 @@ disconnected() {
 # -- steps --------------------------------------------------------------------------------------------------
 infra_up() {
   local slots="${E2E_SLOTS:-${ALL_SLOTS}}" slot name id region url
-  step "test infrastructure: throwaway Snyk orgs (${slots}) + ${REPO_NAME} with a test image in ${REGION_A} and ${REGION_B}"
+  if [[ "${slots}" == "none" ]]; then slots=""; fi # the profiles step: test repositories only, no throwaway org
+  step "test infrastructure: throwaway Snyk orgs (${slots:-none}) + ${REPO_NAME} with a test image in ${REGION_A} and ${REGION_B}"
   [[ "${REGION_A}" != "${REGION_B}" ]] || fail "AWS_REGION and E2E_REGION_B must be two different regions"
   if [[ -n "${E2E_ORG_ID:-}" && "${slots}" != "a" ]]; then fail "E2E_ORG_ID works with ./e2e.sh single (E2E_SLOTS=a) only"; fi
   aws_ok
@@ -288,16 +318,29 @@ infra_up() {
   done
   terraform -chdir=fixture init -input=false >/dev/null
   terraform -chdir=fixture apply -input=false -auto-approve "${FIXTURE_VARS[@]}"
-  docker pull --platform linux/amd64 alpine:3.18
-  for region in a b; do
-    url="$(terraform -chdir=fixture output -raw "repository_url_${region}")"
-    aws ecr get-login-password --region "$([[ "${region}" == "a" ]] && echo "${REGION_A}" || echo "${REGION_B}")" |
-      docker login --username AWS --password-stdin "${url%%/*}"
-    for tag in v1.0.0 latest; do
-      docker tag alpine:3.18 "${url}:${tag}"
-      docker push "${url}:${tag}"
+  if docker info >/dev/null 2>&1; then
+    docker pull --platform linux/amd64 alpine:3.18
+    for region in a b; do
+      url="$(terraform -chdir=fixture output -raw "repository_url_${region}")"
+      aws ecr get-login-password --region "$([[ "${region}" == "a" ]] && echo "${REGION_A}" || echo "${REGION_B}")" |
+        docker login --username AWS --password-stdin "${url%%/*}"
+      for tag in v1.0.0 latest; do
+        docker tag alpine:3.18 "${url}:${tag}"
+        docker push "${url}:${tag}"
+      done
     done
-  done
+  else
+    echo "no Docker engine running: copying the test image with push_image.py over the registry API"
+    # Signed in to AWS's public mirror, the fallback when Docker Hub refuses anonymous pulls (none if not allowed).
+    PUBLIC_ECR_PASSWORD="$(aws ecr-public get-login-password --region us-east-1 2>/dev/null || true)"
+    export PUBLIC_ECR_PASSWORD
+    for region in a b; do
+      url="$(terraform -chdir=fixture output -raw "repository_url_${region}")"
+      aws ecr get-login-password --region "$([[ "${region}" == "a" ]] && echo "${REGION_A}" || echo "${REGION_B}")" |
+        "${PUSH_IMAGE[@]}" "${url}" v1.0.0 latest
+    done
+    unset PUBLIC_ECR_PASSWORD
+  fi
   pass "test infrastructure ready"
 }
 
@@ -541,6 +584,248 @@ final() {
   pass "nothing left behind"
 }
 
+# -- profiles mode (feature 002): several connections in one org --------------------------------------------
+need_profile_org() {
+  local slot
+  [[ "${PROFILE_ORG}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] ||
+    fail "export E2E_PROFILE_ORG_ID: an org with Snyk's multiple profiles feature on and no ECR connection"
+  for slot in ${ALL_SLOTS}; do
+    [[ "$(org_of "${slot}")" != "${PROFILE_ORG}" ]] || fail "E2E_PROFILE_ORG_ID is the throwaway org ${slot}; use an org of your own"
+  done
+}
+account_id() { role_arn | cut -d: -f5; }
+address() { echo "$(account_id).dkr.ecr.$1.amazonaws.com"; }
+P_LAST=-100
+# One tool run against the profiles org, at least 6 s after the last (Snyk allows 10 closed-beta calls a minute):
+# its output kept in .e2e/<log> and shown, its closed-beta calls added to the budget. Returns the tool's exit code.
+pon() {
+  local log="${STATE}/$1" rc=0 wait
+  shift
+  mkdir -p "${STATE}"
+  wait=$((P_LAST + 6 - SECONDS))
+  if ((wait > 0)); then sleep "${wait}"; fi
+  "${ONBOARD[@]}" "$@" --org-id "${PROFILE_ORG}" >"${log}" 2>&1 </dev/null || rc=$?
+  P_LAST=${SECONDS}
+  cb_add "$(sed -n 's/^Closed-beta calls: \([0-9][0-9]*\)$/\1/p' "${log}" | tail -1)"
+  sed 's/^/  | /' "${log}"
+  return "${rc}"
+}
+# The lines a run printed for one connection, without their "[<name>] " prefix (names hold spaces and dots).
+lines_of() { awk -v p="[$2] " 'index($0, p) == 1 { print substr($0, length(p) + 1) }' "${STATE}/$1"; }
+connection_id() { lines_of "$1" "$2" | sed -n 's/^ECR connection\( created\)\{0,1\}: \([^ ]*\).*/\2/p' | head -1; }
+has_conn_project() { lines_of "$1" "$2" | grep -Eq "^  - ([^ ]*/)?${REPO_NAME}:${3}\$"; }
+profiles_onboard() { # log mode region [flags...]
+  local log=$1 mode=$2 region=$3
+  shift 3
+  pon "${log}" "${mode}" --region "${region}" --role-arn "$(role_arn)" "$@"
+}
+# What a first apply of a connection must show: created (or reused), the read proof listing the test repository,
+# a preview of exactly v1.0.0, and the policy applied.
+expect_connected() { # log name created|reused
+  local out
+  out="$(lines_of "$1" "$2")"
+  if [[ "$3" == "created" ]]; then
+    grep -q '^ECR connection created:' <<<"${out}" || fail "[$2] the connection was not created"
+  else
+    grep -q '^ECR connection: ' <<<"${out}" || fail "[$2] the existing connection was not reused"
+    ! grep -q '^ECR connection created:' <<<"${out}" || fail "[$2] a second connection was created"
+  fi
+  grep -q '^Snyk can read the registry:' <<<"${out}" || fail "[$2] the connection test did not pass"
+  grep -Eq "^  ([^ ]*/)?${REPO_NAME} \(" <<<"${out}" || fail "[$2] the connection test did not list ${REPO_NAME}"
+  grep -Eq "^  \+ ([^ ]*/)?${REPO_NAME}: v1\.0\.0\$" <<<"${out}" || fail "[$2] the sync preview should select exactly v1.0.0"
+  grep -qF "Sync policy applied for connection $2;" <<<"${out}" || fail "[$2] the sync policy was not applied"
+}
+profiles_tf_vars() { tf_vars "{}"; TF_VARS+=(-var "snyk_profile_orgs=[\"${PROFILE_ORG}\"]"); }
+
+profiles_preflight() {
+  local log="${STATE}/p_preflight.log"
+  step "profiles preflight: org ${PROFILE_ORG} has the profiles feature and no ECR connection; test infrastructure present"
+  need_profile_org
+  aws_ok
+  [[ "$(org_exists_rc "${PROFILE_ORG}")" == "0" ]] || fail "the profiles org ${PROFILE_ORG} is not reachable with this token"
+  pon p_preflight.log status || fail "status failed on the profiles org"
+  grep -q '^Mode: profiles' "${log}" || fail "org ${PROFILE_ORG} is not in profiles mode (the closed-beta list did not answer 200)"
+  if grep -q '\] ECR connection: ' "${log}"; then fail "org ${PROFILE_ORG} already has an ECR connection; use an org with none"; fi
+  if grep -Eq "^\[[^]]*\]   - ([^ ]*/)?${REPO_PREFIX}" "${log}"; then fail "org ${PROFILE_ORG} already has ${REPO_PREFIX} projects"; fi
+  image_present "${REGION_A}" || fail "test image ${REPO_NAME}:v1.0.0 missing in ${REGION_A} (run ./e2e.sh infra-up)"
+  image_present "${REGION_B}" || fail "test image ${REPO_NAME}:v1.0.0 missing in ${REGION_B} (run ./e2e.sh infra-up)"
+  if role_present; then fail "IAM role ${ROLE_NAME} already exists (run ./e2e.sh profiles-down)"; fi
+  if [[ -f "${ORGS_FILE}" ]]; then fail "${ORGS_FILE} exists from an earlier run (run ./e2e.sh down)"; fi
+  pass "clean starting state for profiles mode"
+}
+
+profiles_new() {
+  : "${SNYK_AWS_PRINCIPAL:?export SNYK_AWS_PRINCIPAL, the Principal shown by the Snyk UI under Integrations > Amazon ECR}"
+  need_profile_org
+  step "profiles: terraform apply with snyk_orgs={} and snyk_profile_orgs=[\"<org>\"]: the role trusts the org, no region"
+  aws_ok
+  if role_present; then fail "IAM role ${ROLE_NAME} already exists (run ./e2e.sh profiles-down)"; fi
+  mkdir -p "${STATE}"
+  touch "${STATE}/profiles_started"
+  profiles_tf_vars
+  plan_and_apply "${PLAN_CREATE}"
+  expect_trust "${PROFILE_ORG}"
+}
+
+profiles_scenario() {
+  local a b b_on_a id_a deadline found l8=""
+  need_profile_org
+  aws_ok
+  a="$(address "${REGION_A}")"
+  b="${LABEL_B} $(address "${REGION_B}")"
+  b_on_a="${LABEL_B} ${a}"
+
+  step "profiles: plan, then apply without a name for ${REGION_A}: a connection named after its registry, ${a}"
+  profiles_onboard p_plan_a.log plan "${REGION_A}" "${SYNC_POLICY[@]}" || fail "plan failed"
+  grep -qF "[${a}] ECR connection missing: apply would create it" "${STATE}/p_plan_a.log" || fail "plan did not report the missing connection"
+  profiles_onboard p_apply_a.log apply "${REGION_A}" "${SYNC_POLICY[@]}" || fail "apply failed"
+  expect_connected p_apply_a.log "${a}" created
+  id_a="$(connection_id p_apply_a.log "${a}")"
+  pass "default name: ${a} (${id_a})"
+
+  step "profiles: apply --connection ${LABEL_B} for ${REGION_B}: a second connection, ${b}; the first untouched"
+  profiles_onboard p_apply_b.log apply "${REGION_B}" --connection "${LABEL_B}" "${SYNC_POLICY[@]}" || fail "apply failed"
+  expect_connected p_apply_b.log "${b}" created
+  pass "two connections in one org (FR-004)"
+
+  step "profiles: apply again without a name for ${REGION_A} reaches the same connection (SC-007)"
+  profiles_onboard p_reapply_a.log apply "${REGION_A}" "${SYNC_POLICY[@]}" || fail "apply failed"
+  expect_connected p_reapply_a.log "${a}" reused
+  [[ "$(connection_id p_reapply_a.log "${a}")" == "${id_a}" ]] || fail "the re-run reached another connection"
+  pass "same registry, same connection: ${id_a}"
+
+  step "profiles: apply --connection ${LABEL_B} with ${REGION_A} is refused, and nothing changes (US1/AC7)"
+  if profiles_onboard p_refuse_b.log apply "${REGION_A}" --connection "${LABEL_B}" "${SYNC_POLICY[@]}"; then
+    fail "naming ${LABEL_B} with another region should be refused"
+  fi
+  grep -qF "Refused: connection '${b}' points at registry $(address "${REGION_B}"), not ${a}" "${STATE}/p_refuse_b.log" ||
+    fail "the refusal did not name the registry ${b} reads"
+  pass "name reuse for another registry refused"
+
+  step "profiles: ${REPO_NAME}:v1.0.0 imported once through each connection (live check L4), not :latest"
+  deadline=$((SECONDS + VERIFY_TIMEOUT))
+  found=""
+  while ((SECONDS < deadline)); do
+    pon p_status.log status || fail "status failed"
+    if has_conn_project p_status.log "${a}" 'v1\.0\.0' && has_conn_project p_status.log "${b}" 'v1\.0\.0'; then found=1; break; fi
+    echo "  not imported through both connections yet; checking again in ${POLL_SECONDS}s"
+    sleep "${POLL_SECONDS}"
+  done
+  [[ -n "${found}" ]] || fail "${REPO_NAME}:v1.0.0 is not under both connections after ${VERIFY_TIMEOUT}s"
+  if has_conn_project p_status.log "${a}" latest || has_conn_project p_status.log "${b}" latest; then
+    fail "latest was imported, but the tag regex excludes it"
+  fi
+  lines_of p_status.log "${a}" | grep -qF "ECR connection: ${id_a} (account $(account_id), region ${REGION_A})" ||
+    fail "status did not give ${a}'s account and region"
+  pass "L4: the same image appears twice, once under each connection, from Snyk's record"
+
+  step "profiles: teardown without a name is refused (US3/AC1)"
+  if pon p_td_none.log teardown --yes; then fail "teardown without --connection should be refused"; fi
+  grep -q "^Refused: teardown needs --connection" "${STATE}/p_td_none.log" || fail "the refusal did not ask for a connection"
+  pass "teardown needs a name"
+
+  step "profiles: teardown --connection ${LABEL_B} --yes pauses it; its project stays (US3/AC2)"
+  pon p_pause_b.log teardown --connection "${LABEL_B}" --yes || fail "teardown failed"
+  lines_of p_pause_b.log "${b}" | grep -q '^Sync policy deleted\.' || fail "the policy of ${b} was not deleted"
+  pon p_status_paused.log status || fail "status failed"
+  lines_of p_status_paused.log "${b}" | grep -q '^Sync policy    : none' || fail "${b} still has a policy"
+  has_conn_project p_status_paused.log "${b}" 'v1\.0\.0' || fail "pausing ${b} removed its project"
+  lines_of p_status_paused.log "${a}" | grep -q '^Sync policy    : ecr-onboarding' || fail "pausing ${b} changed ${a}'s policy"
+  pass "paused ${b}; ${a} untouched"
+
+  step "profiles: teardown --connection ${a} --delete-connection: dry run, then --yes (US3/AC3, AC4; live check L8)"
+  pon p_del_a_dry.log teardown --connection "${a}" --delete-connection || fail "the dry run failed"
+  lines_of p_del_a_dry.log "${a}" | grep -q '^Connection: will be deleted, and with it [1-9][0-9]* project(s) imported through it' ||
+    fail "the dry run did not count the connection's projects"
+  [[ "$(cb_hour)" -lt 100 ]] || fail "closed-beta budget spent"
+  pon p_del_a.log teardown --connection "${a}" --delete-connection --yes || fail "the disconnect failed"
+  lines_of p_del_a.log "${a}" | grep -q '^Connection deleted; Snyk is deleting its projects\.' || fail "the connection was not deleted"
+  for _ in 1 2 3; do
+    sleep "${POLL_SECONDS}"
+    pon p_status_after_del.log status || fail "status failed"
+    if ! grep -qF "[${a}] ECR connection: " "${STATE}/p_status_after_del.log" &&
+      ! grep -Eq "^  \? ([^ ]*/)?${REPO_NAME}:v1\.0\.0\$" "${STATE}/p_status_after_del.log"; then
+      l8="deleted"
+      break
+    fi
+  done
+  if [[ -z "${l8}" ]]; then
+    grep -qF "[${a}] ECR connection: " "${STATE}/p_status_after_del.log" && fail "${a} is still listed after the delete"
+    l8="orphaned"
+  fi
+  echo "${l8}" >"${STATE}/L8"
+  has_conn_project p_status_after_del.log "${b}" 'v1\.0\.0' || fail "disconnecting ${a} touched ${b}'s project"
+  pass "L8: the deleted connection's project was ${l8} by Snyk; ${b} unchanged"
+
+  step "profiles: apply --connection ${LABEL_B} --update-credentials for ${REGION_A}: repointed and renamed (live check L1)"
+  profiles_onboard p_update_b.log apply "${REGION_A}" --connection "${LABEL_B}" --update-credentials "${SYNC_POLICY[@]}" ||
+    fail "the repoint failed"
+  lines_of p_update_b.log "${b}" | grep -q '^  credentials updated' || fail "the credentials were not updated"
+  lines_of p_update_b.log "${b}" | grep -qF "  renamed to '${b_on_a}'" || fail "the connection was not renamed to ${b_on_a}"
+  lines_of p_update_b.log "${b_on_a}" | grep -q '^Snyk can read the registry:' || fail "the repointed connection cannot read ${REGION_A}"
+  pass "L1: Snyk's documented PATCH repointed and renamed the connection"
+
+  step "profiles: teardown --connection ${LABEL_B} --delete-connection --yes"
+  pon p_del_b.log teardown --connection "${LABEL_B}" --delete-connection --yes || fail "the disconnect failed"
+  lines_of p_del_b.log "${b_on_a}" | grep -q '^Connection deleted;' || fail "${b_on_a} was not deleted"
+  pass "both connections disconnected"
+  cb_report
+}
+
+profiles_down() {
+  local name keep
+  step "profiles teardown: the connections this step made, then the role (safe to re-run)"
+  need_profile_org
+  aws_ok
+  if [[ -f "${STATE}/profiles_started" ]] || role_present; then
+    pon p_down_status.log status || fail "status failed on the profiles org"
+    keep="$(address "${REGION_A}")"
+    while IFS= read -r name; do
+      case "${name}" in
+        "${keep}" | "${LABEL_B} "*)
+          pon p_down_del.log teardown --connection "${name}" --delete-connection --yes || fail "could not delete ${name}"
+          ;;
+        *) echo "  keeping ${name}: not made by this step" ;;
+      esac
+    done < <(sed -n 's/^\[\(.*\)\] ECR connection: .*/\1/p' "${STATE}/p_down_status.log")
+  fi
+  profiles_tf_vars
+  terraform init -input=false >/dev/null
+  terraform destroy -input=false -auto-approve "${TF_VARS[@]}"
+  rm -f "${STATE}/tfplan" "${STATE}/profiles_started"
+  if role_present; then fail "IAM role ${ROLE_NAME} still exists after terraform destroy"; fi
+  pass "the profiles step's connections and the role are gone"
+}
+
+profiles_final() {
+  step "profiles final: the org holds no ECR connection; the role and the repositories are gone"
+  need_profile_org
+  aws_ok
+  if role_present; then fail "IAM role ${ROLE_NAME} still exists"; fi
+  if repo_present "${REGION_A}"; then fail "ECR repository ${REPO_NAME} still exists in ${REGION_A}"; fi
+  if repo_present "${REGION_B}"; then fail "ECR repository ${REPO_NAME} still exists in ${REGION_B}"; fi
+  pon p_final.log status || fail "status failed on the profiles org"
+  if grep -q '\] ECR connection: ' "${STATE}/p_final.log"; then fail "org ${PROFILE_ORG} still holds an ECR connection"; fi
+  if grep -Eq "^  \? ([^ ]*/)?${REPO_PREFIX}" "${STATE}/p_final.log"; then
+    fail "${REPO_PREFIX} projects are left without a connection in org ${PROFILE_ORG} (live check L8: Snyk orphaned them); remove them in Snyk's UI"
+  fi
+  cb_report
+  pass "nothing left behind in the profiles org"
+}
+
+profiles() {
+  need_profile_org
+  export E2E_SLOTS=none E2E_ASSUME_YES=1
+  infra_up
+  profiles_preflight
+  profiles_new
+  profiles_scenario
+  profiles_down
+  infra_down
+  profiles_final
+  pass "profiles-mode end-to-end run complete: several connections in one org, each managed on its own"
+}
+
 full() {
   infra_up
   preflight
@@ -557,6 +842,7 @@ full() {
   postcheck
   infra_down
   final
+  cb_report
   pass "full end-to-end run complete; only the AWS account and the Snyk account remain"
 }
 
@@ -572,6 +858,7 @@ single() {
   postcheck
   infra_down
   final
+  cb_report
   pass "single-region end-to-end run complete; only the AWS account and the Snyk account remain"
 }
 
@@ -589,8 +876,14 @@ case "${1:-}" in
   postcheck) postcheck ;;
   infra-down) infra_down ;;
   final) final ;;
+  profiles) profiles ;;
+  profiles-preflight) profiles_preflight ;;
+  profiles-new) profiles_new ;;
+  profiles-scenario) profiles_scenario ;;
+  profiles-down) profiles_down ;;
+  profiles-final) profiles_final ;;
   *)
-    echo "usage: $0 full|single|infra-up|preflight|new|add-region|status|retire-region|down|multi|postcheck|infra-down|final" >&2
+    echo "usage: $0 full|single|profiles|infra-up|preflight|new|add-region|status|retire-region|down|multi|postcheck|infra-down|final|profiles-preflight|profiles-new|profiles-scenario|profiles-down|profiles-final" >&2
     exit 1
     ;;
 esac

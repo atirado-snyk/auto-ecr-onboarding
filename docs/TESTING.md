@@ -3,7 +3,7 @@
 ## Offline (no credentials)
 
 ```bash
-make check     # unit tests (fake Snyk API), terraform fmt/validate, script syntax, terraform test of examples/ (AWS mocked)
+make check     # unit tests (fake Snyk API, fake registries), terraform fmt/validate, script syntax, terraform test of examples/ (AWS mocked)
 make scan      # Snyk Code + Snyk IaC (needs `snyk auth`)
 ```
 
@@ -18,7 +18,8 @@ through the scenarios in the README, checks every step, then removes everything 
 |---|---|
 | AWS account + credentials | A **sandbox** account; `AWS_PROFILE` (or other credentials) that can create IAM roles, change their trust policy (`iam:UpdateAssumeRolePolicy`, needed by `add-region` and `retire-region`; an identity that can create roles may lack it) and create ECR repositories in two regions: `AWS_REGION` (region A, default `ap-southeast-2`) and `E2E_REGION_B` (region B, default `us-east-1`). |
 | Snyk account + credentials | `SNYK_TOKEN` that may **create and delete orgs** in a group, and that group's ID in `SNYK_GROUP_ID` (find it with `uv run harness.py groups`). `SNYK_AWS_PRINCIPAL`: the `Principal` from the trust policy your tenant's UI shows under Integrations → Amazon ECR (the same for every org in the tenant). Non-US tenants: `SNYK_API_BASE`. |
-| Tools | `terraform`, `aws`, `docker` (running), `jq`, `uv`. |
+| Tools | `terraform`, `aws`, `jq`, `uv`. `docker` is optional: when no Docker engine runs (a cloud session, CI), `infra-up` copies the test image into ECR with `push_image.py` over the registry API instead, from Docker Hub, or from AWS's public mirror when Docker Hub refuses anonymous pulls. |
+| Profiles mode only | `E2E_PROFILE_ORG_ID`: an existing org where Snyk has turned on its multiple profiles feature, with no ECR connection. It is never created or deleted. Snyk advises a test org for the beta; the owner uses his own org by choice ([research R10](../specs/002-multi-ecr-connections/research.md#r10-where-the-profile-mode-live-test-runs)). |
 
 ### Layers: each removes exactly what it created
 
@@ -38,7 +39,20 @@ export AWS_PROFILE=<sandbox-profile> AWS_PAGER="" SNYK_GROUP_ID=<group-uuid> SNY
 export SNYK_TOKEN=...
 ./e2e.sh full      # every scenario (about 30 to 60 minutes, mostly waiting for Snyk's syncs)
 ./e2e.sh single    # scenario 1 and the whole-account teardown only (org a, region A)
+E2E_PROFILE_ORG_ID=<org-with-profiles> ./e2e.sh profiles   # several connections in one org (feature 002)
 ```
+
+Unattended: add `E2E_PAUSE=0` (no pause in `full` and `single`); `profiles` never pauses.
+
+### Snyk's closed-beta rate limits
+
+Every run of the tool first asks Snyk's closed-beta Integrations API for the org's mode, and Snyk allows
+1 closed-beta call a second, 10 a minute, and 100 an hour per token, shared by every closed-beta API
+([research R12](../specs/002-multi-ecr-connections/research.md#r12-rate-limits-and-paging-on-the-closed-beta-tier)).
+The e2e logs one line per tool run in `.e2e/closed_beta.log`, warns above 80 calls in the last hour, stops
+before a step above 100, and prints the total at the end. Waiting for a sync, it checks `status` every
+`E2E_POLL_SECONDS` (60). Expect about 20 calls for `single`, 50 to 70 for `full`, and 25 to 40 for
+`profiles`, so run them in different hours rather than back to back.
 
 One org per registry, as in the product: org a (region A) and org b (region B) for scenarios 1 and 2, org n
 (region B, never trusted) for the hint check, orgs c (region A) and d (region B) for scenario 3. `full` runs:
@@ -81,6 +95,23 @@ Observed in the two-region run (2026-10-19):
   that has the permission continues from the trust update.
 - A brand-new role needed one connection retry in `ap-southeast-2` and none in `us-east-1`.
 
+### Profiles mode (`./e2e.sh profiles`)
+
+Validates feature 002 ([quickstart.md, section 3](../specs/002-multi-ecr-connections/quickstart.md#3-profiles-mode-live-constitution-principle-vii))
+in one org that holds several connections. It uses the test repositories in regions A and B and no
+throwaway org, spaces its tool runs at least 6 seconds apart, and takes about 15 to 25 minutes, most of it
+waiting for Snyk's syncs.
+
+| Step | Asserts |
+|---|---|
+| `infra-up` | the ECR repos and test images only (`E2E_SLOTS=none`) |
+| `profiles-preflight` | the org is reachable, `status` prints `Mode: profiles`, the org has no ECR connection and no `snyk-e2e/` projects; both images exist; the role and `snyk-orgs.auto.tfvars` do not |
+| `profiles-new` | `terraform apply` with `snyk_orgs={}` and `snyk_profile_orgs=["<org>"]`: the plan creates exactly the role and its policy; the role trusts exactly that org |
+| `profiles-scenario` | `apply` without a name in region A creates `<account>.dkr.ecr.<A>.amazonaws.com`; `--connection e2e-b` in region B creates `e2e-b <account>.dkr.ecr.<B>.amazonaws.com`; re-running the first reaches the same connection; `e2e-b` with region A is refused; `snyk-e2e/app:v1.0.0` appears once under each connection (live check L4); `teardown` without a name is refused; pausing `e2e-b` keeps its project; disconnecting the first deletes it and leaves `e2e-b` alone, and the step records whether Snyk deleted or orphaned the project (live check L8); `--update-credentials` repoints and renames `e2e-b` to region A (live check L1); disconnecting `e2e-b` |
+| `profiles-down` | deletes any connection this step made (names `<account>.dkr.ecr.<A>.amazonaws.com` or `e2e-b …`), keeps every other, destroys the role; safe to re-run after a failure |
+| `infra-down` | ECR repos destroyed |
+| `profiles-final` | role and repos gone; the org holds no ECR connection and no orphaned `snyk-e2e/` project |
+
 ### If the AWS session expires mid-run
 
 Every step that needs AWS first checks the session and stops with `run aws sso login …` before changing
@@ -103,4 +134,6 @@ first).
   no projects, so the product teardown must have succeeded first.
 - The onboarding script itself has no org or registry delete calls (enforced by a unit test); org
   creation and deletion exist only in `examples/sandbox/harness.py`.
-- Product teardown is scoped to projects under `snyk-e2e/` and to the throwaway orgs.
+- Product teardown is scoped to projects under `snyk-e2e/` and to the throwaway orgs. In profiles mode it is
+  scoped to the connections the step made in `E2E_PROFILE_ORG_ID`, by name; that org itself is never
+  created, deleted, or recorded as a throwaway slot.
