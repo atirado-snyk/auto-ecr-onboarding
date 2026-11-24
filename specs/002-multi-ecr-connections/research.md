@@ -550,7 +550,7 @@ file's earlier sections: Registry ADR 0096 ("Activities" item 5; "Operability", 
 | L2 | How an ECR connection made through v1 on a flagged org appears, and what works on it. Left out of the e2e: it needs a v1 create on a flagged org and cannot be removed through the API | Optional, by hand, once, on a throwaway org | R6 |
 | L3 | The closed-beta list's answer for an org ID that does not exist (**done**, 2026-11-24: `404` `Endpoint Not Found`) and for a token without access (not tried) | Read-only probes | R1 |
 | L4 | Two connections holding the same repository give one target each | The `profiles` e2e step | R5, SC-003 |
-| L5 | The closed-beta calls with an org service account's token | Optional re-run of the `profiles` step | R11 |
+| L5 | The closed-beta calls with an org service account's token, including the mode check on a default-mode org: a `401` or `403` there would stop default-mode runs made with such a token | Optional re-runs of the `single` and `profiles` steps | R1, R11 |
 | L6 | The closed-beta list with a token at version `2024-10-15` (**done**, 2026-11-24: `200` on a flagged org, `404` `Endpoint Not Found` on an unflagged one); the form of `links.next` is still unseen | The owner's read-only probe | R1, R2, R12 |
 | L7 | Rate-limit headers on closed-beta answers (**done**, 2026-11-24: per principal, across closed-beta APIs) | The same probe | R12 |
 | L8 | The projects of a deleted connection: gone, or left orphaned | The `profiles` e2e step | R14 |

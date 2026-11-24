@@ -62,7 +62,7 @@ Every line about a repository, an image, or a project starts with `[<connection'
 
 | Line (`…` marks variable parts) | Printed by |
 |---------------------------------|------------|
-| `Mode: profiles (Snyk's multiple profiles feature is on for this org)` | every mode, first line |
+| `Mode: profiles (Snyk's multiple profiles feature is on for this org)` | every subcommand, first line |
 | `[…] ECR connection missing: apply would create it (…, …)` | `plan` |
 | `[…] ECR connection created: …` | `apply` |
 | `[…] ECR connection: … (account …, region …)` | `plan`, `apply`, `status`, `teardown`, for a name that carries its ECR |

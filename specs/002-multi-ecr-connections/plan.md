@@ -201,9 +201,11 @@ tests/test_onboard_ecr.py           # FakeClient routes for calls 13 to 17; prof
                                     #   including the Principle I delete scope for that mode
 examples/main.tf                    # snyk_profile_orgs, the trusted set, the trusted_org_ids output
 examples/snyk_orgs.tftest.hcl       # New runs for the profile-orgs input
-examples/sandbox/e2e.sh             # New step: profiles
-examples/sandbox/harness.py         # Profiles-mode preflight; a count of closed-beta calls
-tests/test_harness.py               # Guards of the new harness code
+examples/sandbox/e2e.sh             # New step: profiles, with its preflight and the closed-beta call count;
+                                    #   the image copy without Docker where Docker is not running
+examples/sandbox/push_image.py      # New: copies the test image into ECR over the registry API (stdlib)
+tests/test_push_image.py            # New: its offline tests
+examples/sandbox/harness.py         # Unchanged (tasks.md, judgment call 1)
 README.md, docs/USAGE.md, docs/TESTING.md   # Profiles mode; the beta warning in USAGE replaced
 specs/001-ecr-onboarding-baseline/  # FR-016's pointer updated once 002 is delivered
 ```
@@ -217,7 +219,7 @@ closed-beta calls kept together so they can be moved to a published API in one p
 |----|--------|
 | FR-001 | Default mode follows the baseline's code paths; call 13 adds no output |
 | FR-002 | Call 13 before anything else ([R1](research.md#r1-mode-detection-fr-002-question-3)) |
-| FR-003 | `--connection` and `--delete-connection` refused in default mode, before any write |
+| FR-003 | `--connection`, `--exact-name`, and `--delete-connection` refused in default mode, before any write |
 | FR-004 | Lookup lists every ECR connection, the pre-flag one included ([R3](research.md#r3-finding-a-connection-fr-004-fr-005-fr-006), [R6](research.md#r6-a-connection-made-before-the-flag-question-10)) |
 | FR-005 | Names `[<label> ]<registry address>` from the role's account and the region, or exact with `--exact-name`; lookup by full name, by label, or, without a name, by the ECR a name carries ([R3](research.md#r3-finding-a-connection-fr-004-fr-005-fr-006)) |
 | FR-006 | Reuse or create; refusal when the name carries another ECR; a warning when it carries none; `--update-credentials` via call 15, renaming to keep the name true ([R4](research.md#r4-repointing-a-connection---update-credentials-question-2)) |

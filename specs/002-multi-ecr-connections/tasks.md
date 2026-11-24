@@ -19,14 +19,15 @@ Within each story the tests come first and must fail before the code that makes 
 **Organization**: grouped by the spec's user stories, US1 to US5. US1 and US2 are both P1; US1 comes
 first because every other profiles-mode path acts on a connection.
 
-**Live checks**: L1, L4, and L8 are settled by the `profiles` e2e step, which the owner runs (T050).
+**Live checks**: L1, L4, and L8 are settled by the `profiles` e2e step in T053, run in this cloud
+session with the owner's short-lived credentials (owner, 2026-11-24) or by the owner on the Mac.
 Everything else runs offline.
 
 **Judgment calls made while generating** (the owner was away; review them in `/speckit-analyze`):
 
 1. The profiles preflight and the closed-beta call count live in `examples/sandbox/e2e.sh`, using the
    tool's own `status` output, so `examples/sandbox/harness.py` and `tests/test_harness.py` stay
-   unchanged; T046 brings plan.md's source tree in line.
+   unchanged; T049 brought plan.md's source tree in line.
 2. In profiles mode the tool prints `Closed-beta calls: N` to stderr at the end of each run, so the e2e
    step can add them up. It is a new line in the output contract (T016); default mode prints nothing
    new.
@@ -55,7 +56,7 @@ the one script (Principle II), and the closed-beta calls stay together in one se
 **Purpose**: the constants and the test double the profiles-mode work builds on.
 
 - [ ] T001 Add the profiles-mode constants to scripts/onboard_ecr.py: `CLOSED_BETA_VERSION = "2024-10-15"`; `DEFAULT_PROFILE_NAME = "Default profile"`; `PROFILE_UI_PATH = "Organization settings → Integrations → Amazon ECR → Profile Management"`; `STANDARD_ROLE_ARN_RE` for `arn:aws:iam::<12 digits>:role/…`, the only form Snyk's profiles accept (research R13); `LABEL_RE` for a label, "a letter or digit, then letters, digits, `_`, `-`, or `.`"; `PROFILE_NAME_RE` for Snyk's rule, "1 to 255 characters, starting with a letter or digit, of letters, digits, spaces, underscores, hyphens, and dots"; and `CONNECTION_NAME_RE` for `[<label> ]<12 digits>.dkr.ecr.<region>.amazonaws.com` ([data-model.md, Names](data-model.md#names))
-- [ ] T002 [P] Extend the test double in tests/test_onboard_ecr.py: `FakeClient` answers `GET …/closed-beta/orgs/…/integrations` with `404` and `{"errors": [{"status": "404", "detail": "Endpoint Not Found"}]}` unless a test routes it, so the 88 existing tests keep seeing a default-mode org; a fake clock the pacing tests can advance; helpers `profile_entry(id, name, integration_type="ecr")` (a `None` name allowed), `profiles_list(*entries, next=None)`, `target_entry(id, integration_id, display_name)`, and `profile_routes(...)` (call 13 answering `200` plus the baseline's sync routes); and `make_args` gains `connection=None`, `exact_name=False`, and `delete_connection=False`
+- [ ] T002 [P] Extend the test double in tests/test_onboard_ecr.py: `FakeClient` answers `GET …/closed-beta/orgs/…/integrations` with `404` and `{"errors": [{"status": "404", "detail": "Endpoint Not Found"}]}` unless a test routes it, so the 88 existing tests keep seeing a default-mode org; a fake clock the pacing tests can advance; helpers `profile_entry(id, name, integration_type="ecr")` (a `None` name allowed), `profiles_list(*entries, next=None)`, `target_entry(id, integration_id, display_name)`, and `profile_routes(...)` (call 13 answering `200` plus the baseline's sync routes); and `make_args` gains `connection=None`, `exact_name=False`, and `delete_connection=False`. Existing tests that assert an exact call sequence gain the mode check as their first call, and nothing else changes in them (`/speckit-analyze` G5)
 
 ---
 
@@ -81,7 +82,7 @@ every story uses.
 - [ ] T010 Implement the name functions in scripts/onboard_ecr.py: `registry_address`, `account_of(role_arn)`, `connection_name(label, account, region)`, `parse_connection_name(name)` (label, account, and region, or `None`), `validate_label`, and `validate_exact_name`, with errors that quote the rules of T001 (makes T006 pass)
 - [ ] T011 Implement `Connection` records in scripts/onboard_ecr.py from call 13's entries whose `attributes.integration_type` is `ecr`: `id`; `name` from `attributes.profile_name`, where "`null` is read as `Default profile`"; `label`, `account`, `region`, and `registry_address` parsed from the name, "unknown when the name carries no registry address"; and `api_deletable`, "false when `name` is `Default profile`" ([data-model.md, Connection](data-model.md#connection-snyk-profile-call-13))
 - [ ] T012 Add `Refusal(Exception)` to scripts/onboard_ecr.py and handle it in `main`: print `Refused: …`, then `Connections in this org:` and one line per connection, `  <name> (account …, region …)` or `  <name> (registry not in its name)`, to stderr, and exit 1 ([contracts/cli.md, output contract](contracts/cli.md#output-contract-in-profiles-mode))
-- [ ] T013 Add `--connection VALUE`, `--exact-name`, and `--delete-connection` to `parse_args` in scripts/onboard_ecr.py with the meanings in [contracts/cli.md](contracts/cli.md#new-options), and in `validate_inputs` refuse `--exact-name` without `--connection` or with `Default profile` ([data-model.md, refusal rules](data-model.md#validation-and-refusal-rules-before-any-write))
+- [ ] T013 Add `--connection VALUE`, `--exact-name`, and `--delete-connection` to `parse_args` in scripts/onboard_ecr.py with the meanings in [contracts/cli.md](contracts/cli.md#new-options), and in `validate_inputs` refuse `--exact-name` without `--connection`, with `Default profile`, or with `status` or `teardown` (G4) ([data-model.md, refusal rules](data-model.md#validation-and-refusal-rules-before-any-write))
 - [ ] T014 Wire the mode into `run` in scripts/onboard_ecr.py: `org_mode` runs right after `validate_inputs`, before every subcommand; default mode refuses the three new options (FR-003) and otherwise follows the baseline's code paths unchanged; profiles mode prints `Mode: profiles (Snyk's multiple profiles feature is on for this org)` first, applies the partition check (R13), and hands each subcommand to its profiles path; the rule that `--delete-projects` needs `--repo-prefix` applies to default mode only (makes T003 pass)
 - [ ] T015 Thread an output prefix through scripts/onboard_ecr.py: `connection_test`, `summarise`, the messages of `checked_dry_run`, and `run`'s own lines start with `[<connection's full name>] ` in profiles mode and with nothing in default mode, so baseline output stays byte for byte the same (FR-001, FR-009)
 - [ ] T016 In profiles mode, print `Closed-beta calls: N` to stderr at the end of every run, from `closed_beta_calls`, in scripts/onboard_ecr.py, and add that line and the rate-limit stop message to the output contract in specs/002-multi-ecr-connections/contracts/cli.md (research R12; judgment call 2)
@@ -98,19 +99,19 @@ each connection gets its own read proof, preview, and sync policy.
 
 **Independent Test**: with `FakeClient`, an org in profiles mode gets `prod` and `staging` (same
 region, different accounts) and `dr` (second region of the first account), each with its own policy
-and no call on the others' IDs. Live: the `profiles` e2e step (T039).
+and no call on the others' IDs. Live: the `profiles` e2e step (T042).
 
 ### Tests for User Story 1
 
 - [ ] T017 [US1] Write `ProfileLookupTests` in tests/test_onboard_ecr.py covering every row of [data-model.md's lookup table](data-model.md#names): an exact full name first, then the label; several connections with one label are refused and listed; not found creates `VALUE <address>`, or `VALUE` itself when it already carries the run's address, or `VALUE` exactly with `--exact-name`; a `VALUE` carrying another address than the run's is refused; without a name, one connection carrying the ECR is used, several are refused and listed, none creates `<address>`, and none while a connection whose name carries no ECR exists is refused, asking for a name (US1/AC4, US1/AC6; edge cases "One label on two connections" and "Two connections to the same ECR")
-- [ ] T018 [US1] Write `ProfileApplyTests` in tests/test_onboard_ecr.py: AC1 creates `prod …` with call 14's body (`{"data": {"type": "integration", "attributes": {"integration_type": "ecr", "profile_name": …, "credentials": {"region": …, "role_arn": …}}}}`), then runs the connection test, the preview, and the policy on the new ID; AC2 a second connection never puts the first's ID in a sync call (SC-002); AC3 a re-run reuses the connection and replaces only its policy; AC7 a name carrying another ECR is refused with nothing written, naming the ECR it carries; AC8 a name carrying none is used, with the warning line; `--update-credentials` sends call 15 with `data.id`, `data.type: "integration"`, the credentials, and the new name `<label> <new address>` when the old name carried an address; a `409` on create or rename is a refusal and is never retried; an explicit new label for an ECR another connection already carries is allowed with a warning that its images will be imported twice; `plan` never writes (Principle III); two unnamed runs for one ECR create one connection (SC-007); and a run makes at most one closed-beta write (R12)
+- [ ] T018 [US1] Write `ProfileApplyTests` in tests/test_onboard_ecr.py: AC1 creates `prod …` with call 14's body (`{"data": {"type": "integration", "attributes": {"integration_type": "ecr", "profile_name": …, "credentials": {"region": …, "role_arn": …}}}}`), then runs the connection test, the preview, and the policy on the new ID; AC2 a second connection never puts the first's ID in a sync call (SC-002); AC3 a re-run reuses the connection and replaces only its policy; AC7 a name carrying another ECR is refused with nothing written, naming the ECR it carries; AC8 a name carrying none is used, with the warning line; `--update-credentials` sends call 15 with `data.id`, `data.type: "integration"`, the credentials, and the new name `<label> <new address>` when the old name carried an address; a `409` on create or rename is a refusal and is never retried; an explicit new label for an ECR another connection already carries is allowed with a warning that its images will be imported twice; `plan` never writes (Principle III); two unnamed runs for one ECR create one connection (SC-007); a run makes at most one closed-beta write (R12); and SC-001: one org ends with three connections, two in one region of different accounts and two in different regions of one account, each made by one `apply` (G1)
 - [ ] T019 [US1] Write `ProfileFailureHintTests` in tests/test_onboard_ecr.py (FR-008): a connection test that still fails after its retries names the connection as well as the org, and points to `snyk_profile_orgs` as well as `snyk_orgs`
 
 ### Implementation for User Story 1
 
 - [ ] T020 [US1] Implement calls 14 and 15 in the closed-beta section of scripts/onboard_ecr.py as `SnykClient.create_profile(org_id, name, region, role_arn)` and `SnykClient.update_profile(org_id, integration_id, region, role_arn, name=None)`, with the bodies in [contracts/snyk-api.md](contracts/snyk-api.md#new-calls); a `409` raises `Refusal` because the name is taken
 - [ ] T021 [US1] Implement `resolve_connection(connections, args, account, region)` in scripts/onboard_ecr.py per data-model.md's lookup table and [research R3](research.md#r3-finding-a-connection-fr-004-fr-005-fr-006): it returns the connection to use or the name to create, with any warnings, or raises `Refusal` (makes T017 pass)
-- [ ] T022 [US1] Implement `ensure_connection(client, args, connections, create)` in scripts/onboard_ecr.py for `plan` and `apply` in profiles mode, as `ensure_integration` does for default mode: `[…] ECR connection missing: apply would create it (…, …)` in `plan`; the create through call 14 with the existing IAM-propagation retries, except on `409`; `[…] ECR connection created: …`; `[…] ECR connection: … (account …, region …)` on reuse; the AC8 warning; `--update-credentials` through call 15, renaming when the name carries the old address ([research R4](research.md#r4-repointing-a-connection---update-credentials-question-2)); it returns `(id, fresh)` (FR-004, FR-005, FR-006)
+- [ ] T022 [US1] Implement `ensure_connection(client, args, connections, create)` in scripts/onboard_ecr.py for `plan` and `apply` in profiles mode, as `ensure_integration` does for default mode: `[…] ECR connection missing: apply would create it (…, …)` in `plan`; the create through call 14 with the existing IAM-propagation retries, except on `409`; `[…] ECR connection created: …`; `[…] ECR connection: … (account …, region …)` on reuse; the AC8 warning; `--update-credentials` through call 15, renaming when the name carries the old address, and sending the credentials alone when the address is unchanged; `plan --update-credentials` prints what it would change, the new name included, and writes nothing (Principle III; G3) ([research R4](research.md#r4-repointing-a-connection---update-credentials-question-2)); it returns `(id, fresh)` (FR-004, FR-005, FR-006)
 - [ ] T023 [US1] Send `plan` and `apply` in profiles mode through `ensure_connection` in `run` in scripts/onboard_ecr.py, then run the connection test, the dry runs, the `--max-images` guard, and the policy on that connection's ID only (FR-007), ending with `[…] Sync policy applied for connection …; Snyk runs it now and then every … hours.` (makes T018 pass)
 - [ ] T024 [US1] In profiles mode, make `checked_dry_run`'s explanations in scripts/onboard_ecr.py name the connection as well as the org and point to `snyk_profile_orgs` in examples/main.tf (FR-008; makes T019 pass)
 
@@ -127,7 +128,7 @@ and no call on the others' IDs. Live: the `profiles` e2e step (T039).
 
 ### Tests for User Story 2
 
-- [ ] T025 [US2] Write `ProvenanceTests` in tests/test_onboard_ecr.py: two projects named `team-a/app:v1.4.0` whose targets name two connections appear once under each (US2/AC1, SC-003); a project whose name contains another connection's registry host is still attributed by its target, never by its name (FR-011); a target naming no listed connection gives `Connection unknown: N project(s) whose target names no listed connection` (US2/AC3); targets follow the REST `links.next` form
+- [ ] T025 [US2] Write `ProvenanceTests` in tests/test_onboard_ecr.py: two projects named `team-a/app:v1.4.0` whose targets name two connections appear once under each (US2/AC1, SC-003); a project whose name contains another connection's registry host is still attributed by its target, never by its name (FR-011); a target naming no listed connection gives `Connection unknown: N project(s) whose target names no listed connection` (US2/AC3); targets follow the REST `links.next` form; every line of the connection test and the preview starts with `[<connection>] ` (US2/AC2); and `--all-origins` names each ECR project's connection (G2)
 
 ### Implementation for User Story 2
 
@@ -206,9 +207,12 @@ makes only GET calls.
 which settles live checks L1, L4, and L8 (Principle VII).
 
 - [ ] T038 Let `infra_up` in examples/sandbox/e2e.sh create no throwaway org when `E2E_SLOTS=none`, so the profiles step uses only the fixture's repositories
-- [ ] T039 Add the profiles steps to examples/sandbox/e2e.sh per quickstart.md section 3: `profiles-preflight` (needs `E2E_PROFILE_ORG_ID` and `SNYK_AWS_PRINCIPAL`; the org is reachable; `status` prints `Mode: profiles` and no `ECR connection:` line; no `snyk-e2e/` projects; both images exist; the role and `snyk-orgs.auto.tfvars` do not); `profiles-new` (terraform apply with `snyk_orgs={}` and `snyk_profile_orgs=["<org>"]`, a create-only plan, and the trust check); `profiles-scenario` (each row of quickstart's table, in order); `profiles-down` (delete any e2e connection left, then destroy the role); and `profiles`, which runs infra-up, those four steps, infra-down, and a final check that the org holds no ECR connection. The profile org is never created, deleted, or recorded as a slot
-- [ ] T040 Keep the `profiles` step in examples/sandbox/e2e.sh within Snyk's closed-beta limits: at least 6 seconds between tool runs (judgment call 3), add up every run's `Closed-beta calls: N`, print the total, and fail above 100 ([research R12](research.md#r12-rate-limits-and-paging-on-the-closed-beta-tier))
-- [ ] T041 [P] Document the `profiles` step in docs/TESTING.md: `E2E_PROFILE_ORG_ID` (an org with the flag and no ECR connection; the owner's org is used by his choice, research R10), what each part proves, the call budget, and the expected duration
+- [ ] T039 Write tests/test_push_image.py: offline tests for examples/sandbox/push_image.py with a fake transport: the anonymous pull token from `public.ecr.aws`; the `linux/amd64` manifest chosen from the image index; a blob skipped when `HEAD` answers `200`; the one-chunk upload (`POST`, `PATCH`, `PUT ?digest=`); the manifest pushed byte for byte with its media type under each tag; a destination other than `<12 digits>.dkr.ecr.<region>.amazonaws.com/<repository>` refused; and no password in any message (Principle VI)
+- [ ] T040 Write examples/sandbox/push_image.py, standard library only and run with `uv run`: copy `public.ecr.aws/docker/library/alpine:3.18` for `linux/amd64` into an ECR repository under the given tags over the registry HTTP API, reading the ECR password from stdin (piped from `aws ecr get-login-password`), never from the command line (Principle VI; makes T039 pass)
+- [ ] T041 In `infra_up` in examples/sandbox/e2e.sh, push the test image with Docker when `docker info` succeeds and with push_image.py otherwise, so the e2e runs where no Docker engine is available, such as a cloud session
+- [ ] T042 Add the profiles steps to examples/sandbox/e2e.sh per quickstart.md section 3: `profiles-preflight` (needs `E2E_PROFILE_ORG_ID` and `SNYK_AWS_PRINCIPAL`; the org is reachable; `status` prints `Mode: profiles` and no `ECR connection:` line; no `snyk-e2e/` projects; both images exist; the role and `snyk-orgs.auto.tfvars` do not); `profiles-new` (terraform apply with `snyk_orgs={}` and `snyk_profile_orgs=["<org>"]`, a create-only plan, and the trust check); `profiles-scenario` (each row of quickstart's table, in order); `profiles-down` (delete any e2e connection left, then destroy the role); and `profiles`, which runs infra-up, those four steps, infra-down, and a final check that the org holds no ECR connection. The profile org is never created, deleted, or recorded as a slot
+- [ ] T043 Keep every e2e step in examples/sandbox/e2e.sh within Snyk's closed-beta limits, since the mode check now costs one closed-beta call in each run of either mode (U1): `verify_import` polls `status` every 60 seconds instead of 20; the `profiles` step spaces its tool runs at least 6 seconds apart (judgment call 3); the e2e counts one call per default-mode run and the reported `Closed-beta calls: N` per profiles-mode run, prints the total, warns above 80, and fails above 100 ([research R12](research.md#r12-rate-limits-and-paging-on-the-closed-beta-tier))
+- [ ] T044 [P] Document the `profiles` step in docs/TESTING.md: `E2E_PROFILE_ORG_ID` (an org with the flag and no ECR connection; the owner's org is used by his choice, research R10), what each part proves, the closed-beta call budget of every step (`single`, `full`, `profiles`), the expected durations, and that Docker is optional (push_image.py, T040)
 
 **Checkpoint**: the owner can run `./e2e.sh profiles` with one command.
 
@@ -218,16 +222,16 @@ which settles live checks L1, L4, and L8 (Principle VII).
 
 **Purpose**: documentation, the status statements, and the gates.
 
-- [ ] T042 [P] Replace the closed-beta warning in docs/USAGE.md (Constraints, item 1) with a profiles-mode section: how the mode is detected, the names (`[<label> ]<registry address>`, `--exact-name`), lookup with `--connection`, `--update-credentials` and its rename, teardown with `--delete-connection`, the limits of `Default profile`, Snyk's rate limits, and AWS partitions; and qualify the one-integration-per-org text near line 208 for default-mode orgs
-- [ ] T043 [P] Update README.md: an org can hold several ECR connections once Snyk has enabled profiles for it, with a link to docs/USAGE.md
-- [ ] T044 [P] Update FR-016 and its Verification Status row in specs/001-ecr-onboarding-baseline/spec.md to point to feature 002 for profiles-mode orgs
-- [ ] T045 [P] Mark the closed-beta calls as such in the docs (Principle IV condition, plan.md Complexity Tracking): a note in docs/USAGE.md naming the tier, the version `2024-10-15`, and that Snyk may withdraw or promote it
-- [ ] T046 [P] Bring the source tree in specs/002-multi-ecr-connections/plan.md in line with judgment call 1: the profiles preflight and the call count live in examples/sandbox/e2e.sh, and examples/sandbox/harness.py and tests/test_harness.py are unchanged
-- [ ] T047 Add a Verification Status section to specs/002-multi-ecr-connections/spec.md (Principle VII): offline, `make check` with its counts; live, call 13 on `closed-beta` (2026-11-24, L6); not yet verified live, calls 14 to 16 on `closed-beta` (L1, L4, L8), service-account tokens (L5), and SC-001's two accounts (the e2e has one); and align the "Verified live" column of specs/002-multi-ecr-connections/contracts/snyk-api.md
-- [ ] T048 Run `make check` from the Makefile (unit tests, `terraform fmt`, `validate`, the e2e syntax check, `terraform test`) and fix every failure
-- [ ] T049 Scan the branch's history for real IDs before each push (Principle VI), across scripts/onboard_ecr.py, tests/test_onboard_ecr.py, examples/, docs/, and specs/: no 12-digit number other than the placeholders `111111111111`, `222222222222`, and `123456789012`, and no UUID other than the test ones
-- [ ] T050 Owner, on the Mac: run `./e2e.sh single` (SC-004), then `E2E_PROFILE_ORG_ID=<org> ./e2e.sh profiles` from examples/sandbox/, which settle live checks L1, L4, and L8
-- [ ] T051 Record the live results in specs/002-multi-ecr-connections/spec.md (Verification Status) and contracts/snyk-api.md, then run `/speckit-converge`
+- [ ] T045 [P] Replace the closed-beta warning in docs/USAGE.md (Constraints, item 1) with a profiles-mode section: how the mode is detected, the names (`[<label> ]<registry address>`, `--exact-name`), lookup with `--connection`, `--update-credentials` and its rename, teardown with `--delete-connection`, the limits of `Default profile`, Snyk's rate limits, and AWS partitions; and qualify the one-integration-per-org text near line 208 for default-mode orgs
+- [ ] T046 [P] Update README.md: an org can hold several ECR connections once Snyk has enabled profiles for it, with a link to docs/USAGE.md
+- [ ] T047 [P] Update FR-016 and its Verification Status row in specs/001-ecr-onboarding-baseline/spec.md to point to feature 002 for profiles-mode orgs
+- [ ] T048 [P] Mark the closed-beta calls as such in the docs (Principle IV condition, plan.md Complexity Tracking): a note in docs/USAGE.md naming the tier, the version `2024-10-15`, and that Snyk may withdraw or promote it
+- [X] T049 [P] Bring the source tree in specs/002-multi-ecr-connections/plan.md in line with judgment call 1: the profiles preflight and the call count live in examples/sandbox/e2e.sh, examples/sandbox/harness.py and tests/test_harness.py are unchanged, and push_image.py with its tests is new (done with the analysis fixes)
+- [ ] T050 Add a Verification Status section to specs/002-multi-ecr-connections/spec.md (Principle VII): offline, `make check` with its counts; live, call 13 on `closed-beta` (2026-11-24, L6, US tenant only; A2); not yet verified live, calls 14 to 16 on `closed-beta` (L1, L4, L8), service-account tokens (L5), and SC-001's two accounts (the e2e has one); and align the "Verified live" column of specs/002-multi-ecr-connections/contracts/snyk-api.md
+- [ ] T051 Run `make check` from the Makefile (unit tests, `terraform fmt`, `validate`, the e2e syntax check, `terraform test`) and fix every failure
+- [ ] T052 Scan the branch's history for real IDs before each push (Principle VI), across scripts/onboard_ecr.py, tests/test_onboard_ecr.py, examples/, docs/, and specs/: no 12-digit number other than the placeholders `111111111111`, `222222222222`, and `123456789012`, and no UUID other than the test ones
+- [ ] T053 Run `./e2e.sh single` (SC-004), then `./e2e.sh profiles` with `E2E_PROFILE_ORG_ID` set, from examples/sandbox/, which settle live checks L1, L4, and L8: in this cloud session with the owner's short-lived credentials (staged from the gitignored examples/sandbox/.e2e/cloud.env and never printed), or by the owner on the Mac
+- [ ] T054 Record the live results in specs/002-multi-ecr-connections/spec.md (Verification Status) and contracts/snyk-api.md, then run `/speckit-converge`
 
 ---
 
@@ -240,8 +244,8 @@ which settles live checks L1, L4, and L8 (Principle VII).
 - **US4 (Phase 6)**: Terraform only, so it needs nothing from Phases 1 and 2 and can run alongside
   any of them.
 - **Live harness (Phase 8)**: needs US1 to US5.
-- **Polish (Phase 9)**: T042 to T046 can start once their story is done; T047 to T049 come last;
-  T050 needs everything before it; T051 follows T050.
+- **Polish (Phase 9)**: T045 to T049 can start once their story is done; T050 to T052 come last;
+  T053 needs everything before it; T054 follows T053.
 
 ### User Story Dependencies
 
@@ -264,7 +268,7 @@ which settles live checks L1, L4, and L8 (Principle VII).
 - All of US4 (T033 to T035) alongside Phases 1 to 5.
 - US1 and US2 alongside each other after Phase 2, though both edit scripts/onboard_ecr.py and
   tests/test_onboard_ecr.py, so a single implementer takes them in order.
-- T041 and T042 to T046 alongside each other.
+- T044 and T045 to T049 alongside each other.
 
 ---
 
@@ -280,10 +284,10 @@ Task: "T017 Write ProfileLookupTests in tests/test_onboard_ecr.py"
 ## Parallel Example: documentation
 
 ```bash
-Task: "T042 Profiles-mode section in docs/USAGE.md"
-Task: "T043 Profiles mode in README.md"
-Task: "T044 FR-016 pointer in specs/001-ecr-onboarding-baseline/spec.md"
-Task: "T046 Source tree in specs/002-multi-ecr-connections/plan.md"
+Task: "T045 Profiles-mode section in docs/USAGE.md"
+Task: "T046 Profiles mode in README.md"
+Task: "T047 FR-016 pointer in specs/001-ecr-onboarding-baseline/spec.md"
+Task: "T048 Closed-beta note in docs/USAGE.md"
 ```
 
 ---
@@ -300,7 +304,7 @@ Task: "T046 Source tree in specs/002-multi-ecr-connections/plan.md"
 ### Incremental delivery (this run)
 
 Setup, Foundational, US1, US2, US3, US4, US5, the live harness, then Polish, with `make check` green,
-a commit, and a push after each phase. The owner then runs T050.
+a commit, and a push after each phase. T053 then runs the live checks, in this session or on the Mac.
 
 ---
 

@@ -248,7 +248,8 @@ The engineer sees, in one read-only report, every connection of the org and its 
 **Acceptance Scenarios**:
 
 1. **Given** an org with the feature, **When** `status` runs without a name, **Then** it lists every
-   connection with its name, AWS account, region, and policy summary.
+   connection with its name, its AWS account and region (where its name carries them, otherwise
+   where Snyk's UI shows them), and its policy summary (FR-010).
 2. **Given** a connection name, **When** `status` runs, **Then** it reports that connection as the
    baseline reports an org's single connection.
 
@@ -279,6 +280,9 @@ The engineer sees, in one read-only report, every connection of the org and its 
   nothing and lists both; the full name picks one.
 - **A role in AWS's China or GovCloud partitions**: refused before any change, because Snyk's profiles
   accept only `arn:aws:iam::` roles.
+- **Snyk's closed-beta allowance spent** (100 calls an hour per token, shared by every closed-beta API):
+  the mode check comes first in every run, in either mode, so a run that cannot make it stops before
+  any change and says when the allowance resets ([research](research.md), R12).
 - **Snyk turns the feature off for an org with several connections**: the tool follows the mode Snyk
   reports, so it then sees only the connection the v1 listing names; the others stay in Snyk,
   untouched ([research](research.md), R7).
