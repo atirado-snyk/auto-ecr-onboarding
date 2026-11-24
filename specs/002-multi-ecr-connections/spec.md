@@ -338,11 +338,12 @@ Changes to the baseline's entities:
 - **Snyk's UI is out of scope** (owner, 2026-11-24). The tool onboards through Snyk's API, and how
   Snyk's UI then presents connections and projects is Snyk's concern. The tool shows provenance in its
   own output.
-- **Each connection presents the org ID as the external ID**, as a single connection does. To be
-  confirmed in planning.
-- **Deleting a connection deletes its projects**, according to Snyk's UI ("permanently delete all
-  projects associated with this profile"), and asynchronously ("scheduled for removal"). The tool
-  follows the product (owner, 2026-11-24). To be verified live through the API.
+- **Each connection presents the org ID as the external ID**, as a single connection does. Verified
+  live on 2026-11-24.
+- **Deleting a connection deletes its projects**, as Snyk's UI says ("permanently delete all projects
+  associated with this profile"). Verified live through the API on 2026-11-24: the test project was
+  gone seconds after the delete, although the UI describes the removal as scheduled. The tool follows
+  the product (owner, 2026-11-24).
 - **Out of scope**: consolidating existing one-org-per-registry setups into a shared org, and reducing
   duplicate projects when one image exists in several ECRs.
 - **Names** must fit Snyk's limits for profile names. The registry URI is at most about 60 characters

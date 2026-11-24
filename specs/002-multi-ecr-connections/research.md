@@ -128,6 +128,22 @@ the published API, so FR-011 and FR-013 need no hidden API. Not yet seen: two pr
 repository, which Registry ADR 0096 implies gives one target per profile; the Track 3 e2e should
 assert it.
 
+### Sync and delete against a profile, with the token (2026-11-24)
+
+- **The published sync API serves profiles.** The baseline's `plan` on `antonio-org` (read-only; with
+  one profile, the v1 listing names it) reused integration `<profile-id>`. Its connection test, an
+  ImportAll dry run, listed 15 repositories with tagged images (22 tags), and a Regex preview for
+  `^snyk-profile-test/` found `snyk-profile-test/app: v1.0.0` to import. Both are
+  `container_import/{id}/policy/dry_run` calls at REST version `2025-09-17`.
+- **The external ID is the org ID for profiles too** (question 4): the role trusts only `antonio-org`'s
+  ID as `sts:ExternalId`, and the profile connected and read the registry.
+- **A manual import does not count as imported for the sync**: the preview counted `v1.0.0` as "to
+  import" although the UI had already imported it. Worth checking whether a sync then creates a second
+  project or reuses the first.
+- **Deleting the profile deletes its projects at once** (question 5): `DELETE
+  https://api.snyk.io/hidden/orgs/{org}/integrations/{id}?version=2024-10-15` returned `204`, and the
+  imported project was already `404` at the first check, seconds later. FR-014 holds through the API.
+
 ### What the profile settings page's code says (from the HAR's JavaScript bundle)
 
 - **Deleting a profile deletes its projects.** The page's text: "This will permanently delete your
@@ -171,10 +187,9 @@ assert it.
    or Snyk's internal OpenAPI spec.
 3. **How the tool tells an org's mode** (FR-002): for example whether the REST listing answers
    differently for orgs without the flag, or whether Snyk exposes the flag.
-4. **Whether the external ID stays the org ID** for every connection.
-5. **What `DELETE` does to the connection's projects**: Snyk's UI says it deletes them (see above),
-   which reopens FR-014. Still to verify live through the API, and to check whether the hidden API
-   can remove a profile's credentials without deleting it.
+4. ~~Whether the external ID stays the org ID.~~ Answered on 2026-11-24: it does.
+5. ~~What `DELETE` does to the connection's projects.~~ Answered on 2026-11-24: it deletes them at
+   once (`204`, project `404` seconds later), matching the UI's text and FR-014.
 6. **What happens to extra connections if the flag is turned off.**
 7. **How the Terraform input states account access without regions** (FR-016) while the baseline's
    region-to-org map keeps working for default mode (FR-017).
