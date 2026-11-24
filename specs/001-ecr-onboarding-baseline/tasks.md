@@ -249,3 +249,8 @@ delivered.
 - Tasks marked [P] touch different files and depend on no unfinished task.
 - Commit after each task or logical group, and update the Verification Status in the same commit as
   any change to what is verified (Principle VII).
+
+## Phase 8: Convergence
+
+- [ ] T046 CRITICAL: Refuse HTTP redirects in `SnykClient._send` in scripts/onboard_ecr.py (an opener whose redirect handler raises), so the `Authorization` header can reach only the validated Snyk API host; add an offline test in tests/test_onboard_ecr.py that a redirect ends in an error and the token reaches no other host; then run the e2e (gate 3) per Constitution VI, FR-031 (contradicts)
+- [ ] T047 Turn read-phase transport failures (`http.client.IncompleteRead`, a timeout, or a connection reset while reading the body) into the tool's one-line error in `SnykClient.request` in scripts/onboard_ecr.py, with an offline test in tests/test_onboard_ecr.py, per FR-032 (partial)
