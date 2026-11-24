@@ -170,12 +170,12 @@ orgs.
 
 ### Tests for User Story 4
 
-- [ ] T033 [P] [US4] Add runs to examples/snyk_orgs.tftest.hcl ([contracts/terraform-module.md, Tests](contracts/terraform-module.md#tests)): profiles-mode orgs only; an org in both inputs is trusted once (`output.trusted_org_ids`); a non-UUID in `snyk_profile_orgs` is rejected; both inputs empty are rejected. The five existing runs keep passing, with `rejects_an_empty_map` expecting the new check's failure
+- [X] T033 [P] [US4] Add runs to examples/snyk_orgs.tftest.hcl ([contracts/terraform-module.md, Tests](contracts/terraform-module.md#tests)): profiles-mode orgs only; an org in both inputs is trusted once (`output.trusted_org_ids`); a non-UUID in `snyk_profile_orgs` is rejected; both inputs empty are rejected. The five existing runs keep passing, with `rejects_an_empty_map` expecting the new check's failure
 
 ### Implementation for User Story 4
 
-- [ ] T034 [US4] Change examples/main.tf: `snyk_orgs` gets `default = {}` and keeps its region-key and distinct-values validations, losing only the non-empty one; add `snyk_profile_orgs` (`list(string)`, default `[]`, "Every entry a UUID; no duplicates"); pass `distinct(concat(values(var.snyk_orgs), var.snyk_profile_orgs))` to the module; add the output `trusted_org_ids`, sorted; enforce "at least one org across both inputs" with the empty map's error text, through a precondition rather than a validation that reads another variable, which needs Terraform 1.9 ([research R8](research.md#r8-account-access-without-regions-fr-016-fr-017-question-7)); and explain profiles-mode orgs in the header comment (makes T033 pass)
-- [ ] T035 [P] [US4] Add a commented `snyk_profile_orgs` example to examples/snyk-orgs.auto.tfvars.example
+- [X] T034 [US4] Change examples/main.tf: `snyk_orgs` gets `default = {}` and keeps its region-key and distinct-values validations, losing only the non-empty one; add `snyk_profile_orgs` (`list(string)`, default `[]`, "Every entry a UUID; no duplicates"); pass `distinct(concat(values(var.snyk_orgs), var.snyk_profile_orgs))` to the module; add the output `trusted_org_ids`, sorted; enforce "at least one org across both inputs" with the empty map's error text, through a precondition rather than a validation that reads another variable, which needs Terraform 1.9 ([research R8](research.md#r8-account-access-without-regions-fr-016-fr-017-question-7)); and explain profiles-mode orgs in the header comment (makes T033 pass)
+- [X] T035 [P] [US4] Add a commented `snyk_profile_orgs` example to examples/snyk-orgs.auto.tfvars.example
 
 **Checkpoint**: profiles-mode orgs get access without region keys; default-mode inputs behave as
 before (FR-017).
