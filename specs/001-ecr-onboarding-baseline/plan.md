@@ -5,8 +5,9 @@
 **Input**: Feature specification from `specs/001-ecr-onboarding-baseline/spec.md`
 
 **Note**: This is an as-built plan. It records how the delivered code at `f035a43` meets the spec and
-proposes no new implementation, so this feature has no `tasks.md`. The next behavior change starts
-the full cycle (`/speckit-specify` or an amendment, then plan, tasks, implement, converge).
+proposes no new implementation. [tasks.md](tasks.md) records the delivered work by story and carries
+the open items as tasks. The next behavior change starts the full cycle (`/speckit-specify` or an
+amendment, then plan, tasks, implement, converge).
 
 ## Summary
 
@@ -193,6 +194,7 @@ specs/001-ecr-onboarding-baseline/
 ├── research.md              # Decisions as built, undocumented Snyk behavior, open items
 ├── data-model.md            # Entities, relationships, validation rules
 ├── quickstart.md            # How to prove the tool works, offline and live
+├── tasks.md                 # The delivered work by story, plus the open items (/speckit-tasks)
 ├── contracts/
 │   ├── cli.md               # onboard_ecr.py: modes, flags, exit codes, output contract
 │   ├── terraform-module.md  # Module and example root: inputs, outputs, resources
@@ -201,7 +203,8 @@ specs/001-ecr-onboarding-baseline/
     └── requirements.md      # Spec quality checklist (/speckit-specify)
 ```
 
-No `tasks.md`: nothing is left to implement for a baseline.
+`tasks.md` came after this plan, so `/speckit-analyze` and `/speckit-converge` can check the baseline
+as they would any feature.
 
 ### Source Code (repository root)
 
