@@ -11,3 +11,5 @@ examples/sandbox/.e2e/
 *.tfvars
 # macOS Finder metadata
 .DS_Store
+# files the Claude desktop app saves into the folder (probes, attachments)
+Claude outputs/
