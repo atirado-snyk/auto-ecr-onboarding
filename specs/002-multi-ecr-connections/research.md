@@ -96,6 +96,34 @@ What it raises:
 - **Still open**: list, update, and delete shapes; the token permissions needed; the mode signal
   (question 3); provenance (question 1).
 
+### Follow-up checks with the token (2026-11-24)
+
+- **The baseline now sees the profile.** `status` on `antonio-org` reports
+  `ECR integration: <profile-id>`, exactly as for a default-mode org with one connection. With one
+  profile, the v1 view cannot tell the modes apart either.
+- **Token authentication works on the hidden tier.** `GET
+  https://api.snyk.io/hidden/orgs/{org}/integrations?version=2024-10-15` with `Authorization: token …`
+  answered `200`. The same path under `/rest/` answered `404`: the API exists only in the hidden tier.
+- **The list returns every integration type**, not only ECR: the profile, plus `cli`, `gitlab`, `gcr`,
+  `azure-repos`, `github-cloud-app`, and `github`, each with `profile_name: "Default profile"`. The tool
+  must filter on `integration_type: "ecr"`. The list carries no credentials, and `links` was empty for
+  seven integrations.
+
+### What the profile settings page's code says (from the HAR's JavaScript bundle)
+
+- **Deleting a profile deletes its projects.** The page's text: "This will permanently delete your
+  unique integration profile, disconnect from the registry, remove your credentials, and permanently
+  delete all projects associated with this profile. This action cannot be undone." After a delete it
+  reports: "associated projects have been scheduled for removal." This contradicts the assumption
+  behind FR-014 (delete keeps the scans as history), which came from ADR 0096's note that deleting an
+  integration stops the recurring tests of its projects. FR-014 is reopened.
+- **Snyk tracks which projects belong to a profile**, since a delete removes exactly those. That
+  supports question 1, though it does not show a public way to read the link.
+- **Sync policy calls**: `GET`, `POST`, `PATCH`, and `DELETE` on
+  `/orgs/{org_id}/container_import/{integration_id}/policy`, as the baseline already uses them.
+- **Renaming a profile** sends `{profile_name: …}` to an update call whose path is in a bundle the HAR
+  did not include.
+
 ## Decisions from clarification (owner, 2026-11-24)
 
 - **Scope**: several ECRs per org; the region is an attribute of a connection and orthogonal to the
@@ -124,12 +152,14 @@ What it raises:
 3. **How the tool tells an org's mode** (FR-002): for example whether the REST listing answers
    differently for orgs without the flag, or whether Snyk exposes the flag.
 4. **Whether the external ID stays the org ID** for every connection.
-5. **What `DELETE` does to the connection's projects**: the assumption is that they remain and stop
-   being retested (FR-014); verify live.
+5. **What `DELETE` does to the connection's projects**: Snyk's UI says it deletes them (see above),
+   which reopens FR-014. Still to verify live through the API, and to check whether the hidden API
+   can remove a profile's credentials without deleting it.
 6. **What happens to extra connections if the flag is turned off.**
 7. **How the Terraform input states account access without regions** (FR-016) while the baseline's
    region-to-org map keeps working for default mode (FR-017).
 8. ~~Whether Snyk's `profile_name` accepts the registry URI as is.~~ Answered on 2026-11-24: it does
    (see "Observed API calls").
-9. **Whether the hidden integrations API accepts token authentication** at `api.snyk.io`, and whether
-   Snyk will publish it; this decides how the plan meets Principle IV.
+9. **Whether Snyk will publish the integrations API.** Token authentication at `api.snyk.io/hidden`
+   works (verified 2026-11-24); the tier is still unpublished, which decides how the plan meets
+   Principle IV.

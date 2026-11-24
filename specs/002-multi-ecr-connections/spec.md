@@ -88,9 +88,8 @@ flowchart LR
     s1 -- "imported through staging" --> sp
 ```
 
-Each connection follows the baseline's lifecycle on its own, with one difference: disconnecting
-deletes the connection. Its projects stay in the org as historical results that Snyk no longer
-retests.
+Each connection follows the baseline's lifecycle on its own. What disconnecting does to a
+connection's projects is open (FR-014): Snyk's UI says deleting a profile deletes its projects.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -151,15 +150,14 @@ shows two projects for that image, one under each connection.
 ### User Story 3 - Pause or disconnect one connection (Priority: P2)
 
 The engineer pauses or disconnects one connection of a shared org. The other connections keep
-working, and nothing they imported is touched. The disconnected connection's past scans stay as
-history unless the engineer asks to remove them.
+working, and nothing they imported is touched. What happens to the disconnected connection's own
+projects follows FR-014.
 
 **Why this priority**: in a shared org a mistaken teardown reaches more projects, so it must be scoped
 by connection.
 
 **Independent Test**: in an org with `prod` and `staging`, pause `staging`, then disconnect it. `prod`
-keeps its policy, its projects, and a passing read proof throughout, and `staging`'s projects remain
-as history.
+keeps its policy, its projects, and a passing read proof throughout.
 
 **Acceptance Scenarios**:
 
@@ -167,9 +165,8 @@ as history.
    nothing changes, and the tool lists the org's connections.
 2. **Given** `prod` and `staging`, **When** teardown for `staging` is confirmed with no options,
    **Then** only `staging`'s policy is removed (a pause).
-3. **Given** a request to disconnect `staging`, **When** teardown is confirmed, **Then** the policy is
-   removed and the `staging` connection is deleted; its projects stay as historical results, no longer
-   retested; `prod` is unchanged.
+3. **Given** a request to disconnect `staging`, **When** teardown is confirmed, **Then** `staging` is
+   disconnected as FR-014 states, and `prod` is unchanged.
 4. **Given** a request to also remove `staging`'s projects, **When** teardown is confirmed, **Then**
    only projects imported through `staging` are removed, optionally narrowed by a repository prefix,
    even where `prod` has the same repositories.
@@ -278,8 +275,10 @@ The engineer sees, in one read-only report, every connection of the org and its 
 - **FR-013**: Removing projects MUST select the projects imported through the named connection; a
   repository prefix MAY narrow that selection. Where Snyk does not record which connection imported
   them, removal MUST be refused with nothing changed.
-- **FR-014**: Disconnecting a named connection MUST delete the connection. Its projects MUST stay as
-  historical results, no longer retested, unless their removal was requested in the same run.
+- **FR-014**: Disconnecting a named connection MUST [NEEDS CLARIFICATION: Snyk's UI says deleting a
+  profile also deletes all of its projects, so "delete the connection" and "keep its scans as history"
+  cannot both hold. Delete the connection and its projects, with a pause as the way to keep history;
+  or remove only its credentials, if Snyk allows that, and keep the projects?]
 - **FR-015**: A confirmed teardown MUST remove the connection's policy first, then the requested
   projects, then, when asked, the connection.
 
@@ -334,8 +333,9 @@ Changes to the baseline's entities:
   own output.
 - **Each connection presents the org ID as the external ID**, as a single connection does. To be
   confirmed in planning.
-- **A deleted connection's projects remain and stop being retested.** This matches Snyk's design notes
-  and is to be verified live.
+- **Deleting a connection deletes its projects**, according to Snyk's UI ("permanently delete all
+  projects associated with this profile"). This replaces the earlier assumption that they remain;
+  to be verified live through the API.
 - **Out of scope**: consolidating existing one-org-per-registry setups into a shared org, and reducing
   duplicate projects when one image exists in several ECRs.
 - **Names** must fit Snyk's limits for profile names. The registry URI is at most about 60 characters

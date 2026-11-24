@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [x] No [NEEDS CLARIFICATION] markers remain
+- [ ] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -37,6 +37,8 @@
   Details in [research.md](../research.md#decisions-from-clarification-owner-2026-11-24).
 - **Names (FR-005), owner 2026-11-24**: they default to the ECR registry URI for `plan` and `apply`;
   `teardown` needs the name. **Snyk's UI**: out of scope, since the tool onboards through the API.
+- **Reopened 2026-11-24**: FR-014. Snyk's UI says deleting a profile deletes all of its projects,
+  which conflicts with the owner's "delete and keep the scans as history". Waits for the owner.
 - **Depends on planning**: whether Snyk exposes a project's connection (research item 1). The spec
   already defines the behavior either way: report it when available, refuse removal when not.
 - **Implementation details**: the spec names Snyk and AWS concepts and the tool's operations; the API
