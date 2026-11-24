@@ -51,3 +51,10 @@
   registry URI, which identifies the ECR rather than a region. The fourth (second clarification round,
   owner, 2026-11-24) adds the connection made before the flag (FR-004, FR-005) and refuses a name
   reused for another ECR (FR-006); all items still pass.
+- **Validation iteration 5** (third clarification round, owner, 2026-11-24): Snyk's closed-beta
+  documentation shows that no call returns a connection's region or role, so names carry the registry
+  address by default, `[<label> ]<address>`, with an exact name on request (FR-005, FR-006); `status`
+  points to Snyk's UI where a name carries none (FR-010); a connection made before the feature needs a
+  name and cannot be disconnected by the tool (US1/AC6, FR-014); AWS's China and GovCloud partitions
+  are refused (edge cases). All items still pass; the API facts stay in
+  [research.md](../research.md#snyks-closed-beta-documentation-and-internal-sources-2026-11-24).

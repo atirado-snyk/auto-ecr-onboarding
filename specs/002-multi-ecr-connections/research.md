@@ -184,6 +184,63 @@ anything else.
 - **Renaming a profile** sends `{profile_name: …}` to an update call whose path is in a bundle the HAR
   did not include.
 
+## Snyk's closed-beta documentation and internal sources (2026-11-24)
+
+Found after the plan, through Snyk's internal search and Slack, including an engineer's post on
+joining the beta. They change where the tool sends its profiles calls and what it can read back.
+
+- **Snyk's API tiers.** Snyk's API guidelines (ADR 0084) separate `rest` (public), `hidden` (Snyk's own
+  UI, CLI, and IDE plugins; undocumented), `closed-beta` (invited customers; documentation shared
+  privately), and `internal`. The calls observed from the UI went to `hidden`; customers are given
+  `closed-beta`. Closed-beta APIs carry "very low rate limits", quoted as 1 request a second, 10 a
+  minute, and 100 an hour, with no stated basis for counting, and may be withdrawn or promoted.
+- **The Integrations API's beta documentation** (Snyk's preview documentation site, shared with beta
+  customers; read 2026-11-24) gives:
+  - the address `https://api.snyk.io/closed-beta`, version `2024-10-15`, `Authorization: token`, and
+    media type `application/vnd.api+json`;
+  - list, create, get, update (`PATCH`), and delete on `/orgs/{org_id}/integrations[/{id}]`;
+  - an integration object of `id`, `type`, `attributes` (`integration_type`, `profile_name`,
+    `created_at`, `updated_at`, `has_broker`), and `relationships.org`. **No call returns a
+    connection's region or role ARN**;
+  - `PATCH` as a partial update: `data.id`, `data.type: "integration"`, and `profile_name`,
+    `credentials` (`region`, `role_arn`), or both; `409` when the name is taken;
+  - a list of every integration type, with no filter, paged by `starting_after` and `ending_before`,
+    with `limit` from 10 to 100 in steps of 10 (default 10);
+  - `profile_name`: 1 to 255 characters, starting with a letter or digit, of letters, digits, spaces,
+    `_`, `-`, and `.`;
+  - `role_arn` matching `arn:aws:iam::<12 digits>:role/…`, which leaves out AWS's China and GovCloud
+    partitions;
+  - "Only integrations created via the V3 API (with profile_name) can be deleted." An integration made
+    through v1 appears as `Default profile` (the reference says `null`), keeps its v1 ID, and can be
+    renamed and repointed with `PATCH`;
+  - v1 stays the API for monitoring settings, credential deletion, cloning, and imports, and should not
+    be used to create or list integrations on a flagged org;
+  - `406` when the feature is off for the org or the address is wrong, and `409` for a duplicate name;
+  - a delete is permanent, and the connection's projects "become orphaned";
+  - brokered connections are not supported.
+- **The feature's one-pager** (Snyk-internal): v3 for create, update, get, list, and delete; v1 for
+  imports, settings, and cloning; registry sync through the API. "Brokered connections and access on
+  existing (non-Test) Organizations are not supported": the beta belongs in a test org "to prevent
+  credential or settings corruption that could impact existing Projects."
+- **Registry ADR 0096**, read again: `profile_name` is nullable, and a unique index lets v1 create at
+  most one unnamed integration per org and type, which Snyk lists as `Default profile`.
+- **Joining the beta.** The flag, `enableMultipleAccountsPerIntegrationType`, is set per org, not per
+  group. Customers ask their account team or TSM, giving the org IDs; Snyk staff ask in the container
+  team's request channel.
+
+What this changes:
+
+- **Address**: the tool uses `closed-beta`, the tier documented for customers, rather than `hidden`,
+  which Snyk keeps for its own apps (R2).
+- **Mode signal**: `406` on `closed-beta`, not the `404` seen on `hidden`; to be seen live (R1, L6).
+- **Region and role**: the documented API returns neither, so the credentials read seen from the UI (a
+  `hidden` call) is dropped, and the tool reads a connection's ECR from its name (third clarification
+  round, R3).
+- **Update**: the `PATCH` body is documented; live check L1 only confirms it (R4).
+- **A connection made before the flag** cannot be deleted through the API (R6).
+- **Projects on delete**: the documentation and the live check disagree (R14).
+- **Rate limits and paging** (R12), and **AWS partitions** (R13).
+
 ## Decisions from clarification (owner, 2026-11-24)
 
 - **Scope**: several ECRs per org; the region is an attribute of a connection and orthogonal to the
@@ -201,10 +258,20 @@ anything else.
 - **Snyk's UI is out of scope**: the tool onboards through the API, and Snyk's UI follows.
 - **A connection made before the flag is a named connection** (owner, second round): it keeps the
   name Snyk gives it, every operation works on it, and a run without a name for its ECR reaches it
-  instead of creating a duplicate.
+  instead of creating a duplicate. Refined in the third round: its name, `Default profile`, carries no
+  ECR, so a run without a name asks for one instead of reaching it, and Snyk does not let the API
+  delete it.
 - **A name reused for another ECR is refused** (owner, second round): when `apply` names a connection
   with a different AWS account or region than it stores, nothing changes unless the engineer asks to
-  repoint it.
+  repoint it. Refined in the third round: this holds where the name carries the registry address; for
+  any other name the tool uses the connection with a warning.
+- **Names carry their ECR** (owner, third round, after the beta documentation showed that no call
+  returns a connection's region or role): by default a connection the tool creates is named
+  `[<label> ]<registry address>`, so its name says which ECR it reads; an exact name is possible on
+  request. For a connection whose name carries no address, the tool says it cannot check its ECR and
+  points to where Snyk's UI shows the region and role (Organization settings → Integrations → Amazon
+  ECR → Profile Management). The owner judged the gap cosmetic: a customer who names profiles `dev`,
+  `test`, and `prod` knows the rest of their context.
 
 ## What planning must find out
 
@@ -239,6 +306,10 @@ anything else.
 Status after Phase 0 (below): 2 is settled except the update call's body (live check L1); 6, 7, and 9
 are decided (R7, R8, R2); 10 is decided pending live check L2.
 
+Status after the beta documentation (2026-11-24): 2 is answered by it, apart from token permissions
+(R11), and L1 only confirms the update call; 9 is answered for now: the API is a documented closed
+beta, which Snyk may promote (R2); 10 is answered by it (R6), and L2 leaves the e2e.
+
 ## Phase 0: decisions (`/speckit-plan`, 2026-11-24)
 
 Each decision resolves an open question or a design choice the plan depends on. Sources beyond this
@@ -247,55 +318,79 @@ file's earlier sections: Registry ADR 0096 ("Activities" item 5; "Operability", 
 
 ### R1. Mode detection (FR-002, question 3)
 
-- **Decision**: every run starts with call 13 (`GET /hidden/orgs/{org}/integrations`). `200` means
-  profiles mode; `404` whose error detail is exactly `Endpoint Not Found` means default mode; any
-  other answer stops the run with exit 1 before any change. Default mode adds this one read and no
-  output, so baseline output stays as it is (FR-001).
-- **Rationale**: the two answers were seen live on one org of each kind, whatever connections the org
-  held ("Mode signal"). Refusing everything else keeps a flagged org from ever taking the v1 path.
-- **Alternatives**: asking the engineer for the mode (FR-002 says the org decides); inferring it from
-  the v1 listing (it looks the same in both modes).
-- **Residual risk**: if Snyk publishes the API and retires this path, a flagged org would answer
-  `Endpoint Not Found` and look like default mode. The version is pinned and the e2e checks the
-  signal; a published API is a deliberate change to this tool, not a silent one.
+- **Decision**: every run starts with call 13 (`GET /closed-beta/orgs/{org}/integrations`, version
+  `2024-10-15`). `200` means profiles mode; `406` means default mode; any other answer stops the run
+  with exit 1 before any change. Default mode adds this one read and no output, so baseline output
+  stays as it is (FR-001). Live check L6 confirms both answers on `closed-beta` before the task that
+  implements the check, and records the `406` body so the tool can match more than the status.
+- **Rationale**: Snyk's beta documentation gives `406` for an org without the feature. On `hidden` the
+  same split was seen live, as `200` and `404` `Endpoint Not Found`, on one org of each kind whatever
+  connections it held ("Mode signal"). Refusing everything else keeps a flagged org from ever taking
+  the v1 path.
+- **Alternatives**: staying on `hidden`, whose signal is verified (Snyk keeps it for its own apps,
+  R2); asking the engineer for the mode (FR-002 says the org decides); inferring it from the v1
+  listing (it looks the same in both modes).
+- **Residual risk**: the documentation gives `406` for a wrong address too, so a mistyped path or a
+  retired version would make a flagged org look like default mode. The path and version are one
+  pinned constant that a unit test asserts, and the `profiles` e2e step requires `200` on its flagged
+  org, so such a change fails the live test before release. If Snyk promotes the API, moving to it is
+  a deliberate change through Spec Kit.
 
-### R2. Snyk's unpublished integrations API (question 9, Principle IV)
+### R2. Snyk's closed-beta Integrations API (question 9, Principle IV)
 
-- **Decision**: manage connections in profiles mode through the `hidden` tier at version
-  `2024-10-15`, the only API that lists, creates, updates, and deletes profiles. Record this as the
-  one Principle IV exception in the plan's Complexity Tracking, with the conditions of Principle IV's
-  own clause for undocumented behavior: the calls are isolated in one section of `SnykClient`, the
-  docs mark them as undocumented, each is verified live before release, and the version is pinned.
+- **Decision**: manage connections in profiles mode through the `closed-beta` tier at version
+  `2024-10-15`, the API Snyk documents for beta customers to list, create, update, and delete
+  profiles. Record it as the one Principle IV exception in the plan's Complexity Tracking: its
+  documentation is private to beta customers and carries no stability promise, and the tier may be
+  withdrawn or promoted. Conditions, from Principle IV's own clause for undocumented behavior: the
+  calls are isolated in one section of `SnykClient`; the docs mark them as closed beta; each is
+  verified live before release; the version is pinned; the calls are paced (R12).
 - **Rationale**: Snyk's material calls it the "V3 Integrations API" and says the beta is configured
-  only through it; no publication date was found. Without it there is no profiles mode.
-- **Alternatives**: waiting for publication (no date); Snyk's UI (out of scope, owner; not
-  automatable). **Owner action**: ask the beta team whether and when the API will be published.
-- **Approved** by the owner on 2026-11-24, with the conditions above.
+  only through it. The `hidden` tier serves the same paths to Snyk's UI, but Snyk documents nothing
+  there and keeps it for its own apps; `closed-beta` is what customers are given.
+- **Alternatives**: `hidden` (undocumented, for Snyk's own apps); waiting for publication (no date);
+  Snyk's UI (out of scope, owner; not automatable). **Owner action**: ask the beta team whether and
+  when the API will be promoted to `rest`.
+- **Approved** by the owner on 2026-11-24 for the `hidden` tier, with the conditions above. The move to
+  `closed-beta` follows Snyk's beta documentation and narrows the exception, since its request shapes
+  are documented.
 
 ### R3. Finding a connection (FR-004, FR-005, FR-006)
 
-- **Decision**: list the org's ECR connections (call 13, `integration_type: "ecr"`), and read each
-  one's region and role ARN (call 14); the account is the role ARN's account. With `--connection`,
-  match the name exactly. Without it, match the ECR (account and region): none means create one
-  named after the registry URI, one means use it whatever its name, several means change nothing and
-  list them. A named connection whose stored account or region differs from the run's is refused
-  unless `--update-credentials` is given.
-- **Rationale**: it implements the second clarification round directly, and a re-run without a name
-  always lands on the same connection (SC-007).
-- **Alternatives**: matching by name only (a connection made before the flag would then be
-  duplicated); comparing the full role ARN (a changed role name is a credentials update, not another
-  ECR).
+- **Decision**: list the org's ECR connections (call 13, every page, `integration_type: "ecr"`) and
+  read each one's ECR from its name. A name carries an ECR when it is `<registry address>` or
+  `<label> <registry address>`, where the address is `<12 digits>.dkr.ecr.<region>.amazonaws.com` and
+  the label starts with a letter or digit and holds only letters, digits, `_`, `-`, and `.`. Any other
+  name (`Default profile`, a name given in Snyk's UI, an exact name) carries no ECR. Then:
+  - `--connection VALUE`: the connection whose full name is VALUE; failing that, those whose label is
+    VALUE (several: change nothing, list them). Found, carrying an ECR other than the run's: refused
+    unless `--update-credentials`. Found, carrying none: used, with a warning that its ECR cannot be
+    checked. Not found: created as `VALUE <run's address>`; as VALUE itself when VALUE already carries
+    the run's address; exactly as VALUE with `--exact-name`. A VALUE carrying another address than the
+    run's is refused.
+  - No name: the connections whose names carry the run's ECR. One: use it. Several: change nothing,
+    list them. None: create `<run's address>`, unless a connection carrying no ECR exists; then change
+    nothing and ask for a name, since that connection might read the same ECR.
+- **Rationale**: it implements the third clarification round. A re-run without a name lands on the same
+  connection (SC-007), and the list is the only read needed, which matters under the closed-beta rate
+  limits (R12).
+- **Alternatives**: reading region and role through `hidden`'s credentials call, as Snyk's UI does
+  (undocumented, and Snyk's documented API leaves them out); matching by name only (a re-run without a
+  name could not find its connection); comparing the full role ARN (not readable).
 
 ### R4. Repointing a connection (`--update-credentials`, question 2)
 
-- **Decision**: `PATCH /hidden/orgs/{org}/integrations/{id}` (call 16), which ADR 0096 lists. Its
-  body is not yet known; live check L1 settles it before the task that implements the call.
-- **Alternatives**: delete and re-create the connection (it would delete the connection's projects,
-  FR-014).
+- **Decision**: `PATCH /closed-beta/orgs/{org}/integrations/{id}` (call 15) with `data.id`,
+  `data.type: "integration"`, and `attributes.credentials` (`region`, `role_arn`), as Snyk's beta
+  documentation gives it. When the connection's name carries its ECR, the same call renames it to carry
+  the new address, keeping its label, so the name stays true; a `409` (name taken) refuses the change.
+  Live check L1 confirms the call on a connection the e2e created.
+- **Alternatives**: deleting and re-creating the connection (it would delete the connection's projects,
+  FR-014); repointing without renaming (the name would then name the wrong ECR).
 
 ### R5. Provenance (FR-009 to FR-011, FR-013)
 
-- **Decision**: a project's connection is the `relationships.integration` of its target (call 18,
+- **Decision**: a project's connection is the `relationships.integration` of its target (call 17,
   `GET /rest/orgs/{org}/targets`), and the project's target is its `relationships.target` (call 11).
   `status` groups projects by connection. A project whose target names no connection is reported as
   "connection unknown", and `teardown --delete-projects` refuses while any project of the org is in
@@ -307,13 +402,23 @@ file's earlier sections: Registry ADR 0096 ("Activities" item 5; "Operability", 
 
 ### R6. A connection made before the flag (question 10)
 
-- **Decision**: it is listed like any profile and used under the name the hidden list gives it. ADR
-  0096 stores profile names as nullable and adds a unique index on org and type where the name is
-  null, so v1 can create at most one unnamed ECR connection per org; the hidden list shows unnamed
-  integrations of other types as `Default profile`. Live check L2 confirms the name and that reads,
-  policy changes, and delete work on it.
-- **Alternatives**: refusing such orgs, or managing that connection through v1 (it would break the
-  API split by mode).
+- **Decision**: it is one of the org's connections, listed under the name Snyk gives it,
+  `Default profile` (or no name, which the tool treats the same way). Its name carries no ECR, so the
+  tool uses it only when named (`--connection "Default profile"`), with R3's warning, and while it
+  exists a run without a name asks for one instead of creating a connection (R3). Snyk does not let
+  the API delete it, so `--delete-connection` on it is refused before any change, pointing to Snyk's
+  UI; the refusal also suggests renaming it there to its registry address, after which the tool
+  recognizes it. Policy changes, pauses, and provenance use its ID and are expected to work as on any
+  connection (not seen live).
+- **Rationale**: Snyk's beta documentation ("Only integrations created via the V3 API (with
+  profile_name) can be deleted"; v1 integrations appear as `Default profile` and can be renamed and
+  repointed), and ADR 0096's nullable name with its index allowing one unnamed integration per org and
+  type.
+- **Live check L2 leaves the e2e**: making such a connection needs a v1 create on a flagged org, which
+  Snyk's documentation advises against, and the result could not be removed through the API. Unit
+  tests cover the tool's handling; an owner may run L2 once, by hand, on a throwaway org.
+- **Alternatives**: refusing such orgs; managing that connection through v1 (it would break the API
+  split by mode); renaming it through the tool (not asked for).
 
 ### R7. The flag turned off for an org with several connections (question 6)
 
@@ -344,12 +449,15 @@ file's earlier sections: Registry ADR 0096 ("Activities" item 5; "Operability", 
 
 ### R9. Command-line surface
 
-- **Decision**: one new option, `--connection NAME`, for every mode, and one teardown flag,
-  `--delete-connection`, which deletes the connection and with it its projects. In default mode both
-  are refused before any change (FR-003). In profiles mode `--delete-credentials` is refused with a
-  pointer to `--delete-connection` or a pause, `--delete-projects` selects by provenance with
+- **Decision**: two new options for every mode, `--connection VALUE` (a label or a full name, R3) and
+  `--exact-name` (create VALUE as the whole name, with no address added), and one teardown flag,
+  `--delete-connection`, which deletes the connection and with it its projects. In default mode all
+  three are refused before any change (FR-003). In profiles mode `--delete-credentials` is refused
+  with a pointer to `--delete-connection` or a pause, `--delete-projects` selects by provenance with
   `--repo-prefix` optional, and `teardown` without `--connection` lists the connections and exits 1.
-  Every line about a repository, an image, or a project starts with `[<connection>]` (FR-009).
+  Every line about a repository, an image, or a project starts with `[<connection's full name>]`
+  (FR-009). `status` gives each connection's account and region from its name, or, where its name
+  carries none, where Snyk's UI shows them (FR-010).
 - **Rationale**: a separate flag keeps the deletion of projects explicit (FR-014), and exit 1 lets CI
   catch a teardown that named nothing.
 
@@ -360,19 +468,58 @@ file's earlier sections: Registry ADR 0096 ("Activities" item 5; "Operability", 
   no ECR connection. The step connects the fixture's two registries (the same image in two regions),
   names its connections, and deletes only the ones it created. Today only `antonio-org` has the flag,
   and it holds 60 other projects; a throwaway org with the flag is safer. **Owner action**: ask the
-  beta team for one. The owner chose `antonio-org` for now, under these guards (2026-11-24).
+  beta team for one. The owner chose `antonio-org` for now, under these guards (2026-11-24), and kept
+  it after reading the feature's one-pager, which says the beta is not supported on existing (non-test)
+  orgs "to prevent credential or settings corruption that could impact existing Projects": a risk the
+  owner accepted on 2026-11-24.
 
-### R11. Token permissions for the hidden calls
+### R11. Token permissions for the closed-beta calls
 
 - **Decision**: record what the e2e uses (the owner's token, org admin) and mark service-account
-  tokens as not verified (live check L5, optional).
+  tokens as not verified (live check L5, optional). Snyk's beta documentation states no permissions.
+
+### R12. Rate limits and paging on the closed-beta tier
+
+- **Decision**: a run makes as few closed-beta calls as it can: the list once (every page, `limit=100`),
+  kept for the run, and at most one write (create, update, or delete). The transport spaces
+  closed-beta calls at least one second apart and handles `429` as it does for any call (its
+  `Retry-After`, at most 60 seconds, within its retries), then stops with a message that names Snyk's
+  closed-beta rate limit. Pages follow `links.next` on the Snyk API host only, as the baseline's
+  pagination does; the baseline adds `/rest` to a relative link, so the closed-beta list needs its own
+  prefix, whose form L6 shows. The `profiles` e2e step counts its closed-beta calls and stays under
+  100 an hour.
+- **Rationale**: the limits quoted in ADR 0084 are low, and their counting basis (token, org, or
+  tenant) is unknown. A typical run makes two or three closed-beta calls.
+- **Owner action**: ask the beta team how the limits are counted. Live check L7 records the
+  rate-limit headers, if Snyk sends any.
+
+### R13. AWS partitions
+
+- **Decision**: in profiles mode a role ARN outside AWS's standard partition (`arn:aws-cn:`,
+  `arn:aws-us-gov:`) or a region of those partitions (`cn-…`, `us-gov-…`) is refused before any
+  change, naming the limitation. Default mode is unchanged.
+- **Rationale**: Snyk's `role_arn` pattern accepts only `arn:aws:iam::`, so such a create would fail
+  at Snyk after the run had begun. The default name's address therefore always ends in
+  `.amazonaws.com`.
+
+### R14. What a delete does to the connection's projects
+
+- **Decision**: FR-014 stands: the tool follows what the product did when tested, which was to delete
+  the projects at once ("Sync and delete against a profile"), as Snyk's UI also says. The `profiles`
+  e2e step checks it again after its delete (live check L8). If the projects stay, orphaned, as Snyk's
+  beta documentation says, the dry run's wording and FR-014 change through Spec Kit, by owner
+  decision.
+- **Owner action**: ask the beta team which behavior is intended.
 
 ### Live checks before or during implementation
 
 | ID | What | How | Settles |
 |----|------|-----|---------|
-| L1 | The body of `PATCH /hidden/orgs/{org}/integrations/{id}` that changes region and role ARN | A probe against a connection the e2e created | R4, call 16 |
-| L2 | How an ECR connection made through v1 on a flagged org appears in the hidden list, and whether reads, policy changes, and delete work on it | An e2e sub-step: the harness creates one through v1, the tool manages it | R6 |
-| L3 | The hidden list's answer for an org ID that does not exist and for a token without access | Two read-only probes | R1's refusal messages |
+| L1 | The documented `PATCH` changes a connection's region and role ARN, and renames it, on a connection the e2e created | The `profiles` e2e step | R4, call 15 |
+| L2 | How an ECR connection made through v1 on a flagged org appears, and what works on it. Left out of the e2e: it needs a v1 create on a flagged org and cannot be removed through the API | Optional, by hand, once, on a throwaway org | R6 |
+| L3 | The closed-beta list's answer for an org ID that does not exist and for a token without access | Two read-only probes | R1's refusal messages |
 | L4 | Two connections holding the same repository give one target each | The `profiles` e2e step | R5, SC-003 |
-| L5 | The hidden calls with an org service account's token | Optional re-run of the `profiles` step | R11 |
+| L5 | The closed-beta calls with an org service account's token | Optional re-run of the `profiles` step | R11 |
+| L6 | The closed-beta list with a token at version `2024-10-15`: `200` on a flagged org, `406` and its body on an unflagged one, and the form of `links.next` | A read-only probe on the owner's machine, before the mode-check task | R1, R2, R12 |
+| L7 | Rate-limit headers on closed-beta answers | The same probe | R12 |
+| L8 | The projects of a deleted connection: gone, or left orphaned | The `profiles` e2e step | R14 |
