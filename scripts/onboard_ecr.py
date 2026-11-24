@@ -29,6 +29,7 @@ Standard library only, so it runs unchanged with `uv run` or in any CI runner.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import pathlib
@@ -82,6 +83,24 @@ class DryRunFailed(RuntimeError):
     """Snyk reported the dry-run job as failed (for example it could not read the registry)."""
 
 
+class RedirectRefused(RuntimeError):
+    """The API answered with a redirect, which is never followed (see _RefuseRedirects)."""
+
+
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """urllib follows redirects by itself and resends the request's headers, Authorization included, to
+    whatever host the Location names, from https to http too. The token must reach only the validated
+    Snyk API host, so no redirect is followed: the call fails instead."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        fp.close()
+        raise RedirectRefused(f"{req.get_method()} {req.full_url.split('?')[0]} answered HTTP {code}, a redirect to "
+                              f"{newurl.split('?')[0]}; not followed, so the token goes only to the Snyk API host")
+
+
+_OPENER = urllib.request.build_opener(_RefuseRedirects)
+
+
 def validate_api_base(api_base: str) -> str:
     """Refuse to send the token anywhere but a Snyk API host over HTTPS."""
     parsed = urllib.parse.urlparse(api_base)
@@ -113,7 +132,7 @@ class SnykClient:
     def _send(self, method: str, url: str, headers: dict[str, str], body: bytes | None) -> tuple[int, dict[str, str], str]:
         req = urllib.request.Request(url, data=body, method=method, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 (https enforced)
+            with _OPENER.open(req, timeout=60) as resp:  # noqa: S310 (https enforced; redirects refused)
                 return resp.status, dict(resp.headers), resp.read().decode("utf-8")
         except urllib.error.HTTPError as err:
             return err.code, dict(err.headers or {}), err.read().decode("utf-8", "replace")
@@ -135,6 +154,9 @@ class SnykClient:
                 status, resp_headers, text = self._send(method, url, headers, body)
             except urllib.error.URLError as err:  # DNS, TLS, proxy, connection refused, timeouts
                 raise RuntimeError(f"cannot reach {method} {url.split('?')[0]}: {err.reason}") from err
+            except (OSError, http.client.HTTPException) as err:  # timeout, reset, or a body cut short
+                raise RuntimeError(f"connection lost while reading {method} {url.split('?')[0]}: "
+                                   f"{str(err) or type(err).__name__}") from err
             if 200 <= status < 300:
                 try:
                     return json.loads(text) if text.strip() else {}
@@ -469,8 +491,17 @@ def checked_dry_run(client: SnykClient, args: argparse.Namespace, integration_id
                 client._sleep(args.connect_delay)
                 continue
             if fresh:
-                raise DryRunFailed(f"{err}. Check the Snyk principal and org ID in the role's trust policy, "
-                                   "the --region, and that us-east-2 is enabled for STS.") from err
+                raise DryRunFailed(
+                    f"{err}. Snyk still cannot use the role after {attempts} attempts. Likely causes "
+                    "(this script cannot read the role's trust policy, so check them in AWS):\n"
+                    f"  - org {args.org_id} is missing from the role's sts:ExternalId list: add it to the org IDs "
+                    "the role trusts (snyk_orgs in examples/main.tf, snyk_org_ids on the module), keep every "
+                    "existing ID, and run terraform apply\n"
+                    "  - the Snyk principal in the role's trust policy is not the one your Snyk tenant's UI shows\n"
+                    f"  - --region {args.region} is not the region of the ECR registry\n"
+                    "  - us-east-2 is not enabled for STS in the AWS account\n"
+                    "The integration now exists, so after the fix re-run 'apply' with --update-credentials: it stores "
+                    "the role and region again and retries while the change propagates.") from err
             raise DryRunFailed(f"{err}. If this integration was disconnected (teardown --delete-credentials) or "
                                "points at another role/region, re-run 'apply' with --update-credentials.") from err
     raise AssertionError("unreachable")

@@ -1,4 +1,4 @@
-.PHONY: test tf-validate check scan aws-whoami
+.PHONY: test tf-validate tf-test check scan aws-whoami
 
 MODULE := terraform/modules/snyk-ecr-role
 
@@ -11,7 +11,11 @@ tf-validate:     ## terraform fmt (all roots) + validate the module (no credenti
 	terraform -chdir=$(MODULE) validate
 	bash -n examples/sandbox/e2e.sh
 
-check: test tf-validate
+tf-test:         ## terraform test for the example's region => org map (AWS provider mocked, no credentials)
+	terraform -chdir=examples init -backend=false -input=false >/dev/null
+	terraform -chdir=examples test
+
+check: test tf-validate tf-test
 
 scan:            ## Snyk Code (Python) and Snyk IaC (Terraform); needs `snyk auth`
 	snyk code test .

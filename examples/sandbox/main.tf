@@ -1,9 +1,26 @@
 # Product under test: the IAM role Snyk assumes, created with the module exactly as a consumer would.
-# Applied and destroyed by e2e.sh (up / down). Test infrastructure (the ECR repo) is in ./fixture.
+# Same inputs as examples/main.tf (a region => Snyk org ID map, given as a -var switch or in
+# snyk-orgs.auto.tfvars), plus a distinct role name. Applied and destroyed by e2e.sh. Test
+# infrastructure (the ECR repositories) is in ./fixture.
 
-variable "snyk_org_id" {
-  description = "Snyk org UUID the role trusts (also the sts:ExternalId)."
-  type        = string
+variable "snyk_orgs" {
+  description = "ECR registry region => Snyk org ID, one entry per registry in this account."
+  type        = map(string)
+
+  validation {
+    condition     = length(var.snyk_orgs) > 0
+    error_message = "snyk_orgs needs at least one entry: region = \"<snyk-org-id>\"."
+  }
+
+  validation {
+    condition     = alltrue([for region in keys(var.snyk_orgs) : can(regex("^[a-z]{2}(-[a-z]+)+-[0-9]$", region))])
+    error_message = "snyk_orgs keys must be AWS regions such as \"ap-southeast-2\": the region of each ECR registry."
+  }
+
+  validation {
+    condition     = length(distinct(values(var.snyk_orgs))) == length(var.snyk_orgs)
+    error_message = "A Snyk org can hold only one ECR integration (one region), so an org ID must not appear under two regions."
+  }
 }
 
 variable "snyk_aws_principal" {
@@ -18,8 +35,9 @@ variable "role_name" {
 }
 
 variable "region" {
-  type    = string
-  default = "ap-southeast-2"
+  description = "IAM is global; this region only selects the API endpoint Terraform calls."
+  type        = string
+  default     = "ap-southeast-2"
 }
 
 provider "aws" {
@@ -29,7 +47,7 @@ provider "aws" {
 module "snyk_ecr" {
   source = "../../terraform/modules/snyk-ecr-role"
 
-  snyk_org_ids       = [var.snyk_org_id]
+  snyk_org_ids       = values(var.snyk_orgs)
   snyk_aws_principal = var.snyk_aws_principal
   role_name          = var.role_name
 
@@ -41,4 +59,8 @@ module "snyk_ecr" {
 
 output "role_arn" {
   value = module.snyk_ecr.role_arn
+}
+
+output "snyk_orgs" {
+  value = var.snyk_orgs
 }
