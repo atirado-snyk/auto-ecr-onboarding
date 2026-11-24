@@ -36,7 +36,7 @@ connection's ECR from its name (research R3).
 | # | Change in profiles mode |
 |---|-------------------------|
 | 1 to 4 | Never called: v1 is for default mode only (product invariant "API split by mode"), and Snyk's beta documentation advises against v1 creates and lists on a flagged org |
-| 5 to 10 | Unchanged, with `{id}` the named connection's integration ID (verified with a profile on 2026-11-24) |
+| 5 to 10 | Unchanged, with `{id}` the named connection's integration ID (verified with a profile on 2026-11-24). The preview lists images that the sync never imports: tags of a repository name another connection already holds (live check L4, 2026-11-24) |
 | 11 | Also reads `relationships.target.data.id` of each project |
 | 12 | Used for `teardown --delete-projects --yes` on projects whose target names the connection |
 

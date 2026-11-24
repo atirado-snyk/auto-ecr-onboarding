@@ -283,8 +283,34 @@ empty preview). Every attempt's connections and role were removed by `profiles-d
 | `snyk_profile_orgs` (FR-016) | Pass: a create-only plan; the role trusts exactly the org, with no region key |
 | Pacing (R12) | 75 closed-beta calls in the busiest hour; no run stopped on a rate limit |
 | **L8: the projects of a deleted connection** | **Orphaned**, as Snyk's beta documentation says: a project imported at 08:42 still existed at 09:00, its target naming the connection deleted at 08:43, until it was deleted by hand. The baseline's earlier observation on `hidden` (the project gone seconds later) did not repeat |
-| **L4: one project per connection** | **Not verified.** The first connection of the day imported `snyk-e2e/app:v1.0.0` 14 seconds after its policy. No later connection imported it, including two fresh ones in an org with no leftover (10 minutes). After a connection's first sync, its preview turned from "1 to import" to "0 to import" with no project made. A targeted run (below) tells apart a memory of the repository, a memory of the image digest, and one project per repository name per org |
+| **L4: the same repository through two connections** | **One connection per repository name.** The first connection to import a repository holds it. A second connection never imports any tag of that repository, whatever the digest, while its preview lists those images as "to import". A repository only the second connection reads is imported within a minute ("Targeted import runs", below). Earlier the same day, the first connection imported `snyk-e2e/app:v1.0.0` 14 seconds after its policy, and no later connection imported it, including two fresh ones in an org with no leftover (10 minutes) |
 | L1: repointing (call 15) | Left out by the owner for now (2026-11-24) |
+
+### Targeted import runs (L4, owner-approved, 2026-11-24)
+
+Connection A (`<registry address>`, `ap-southeast-2`) and connection `e2e-b <registry address>`
+(`us-east-1`), both with the Regex policy, checked by `status` about once a minute.
+
+| Run | Pushed | After 6 to 8 minutes |
+|-----|--------|----------------------|
+| 1 (09:44), both regions, both policies applied the same minute | `snyk-e2e/app-0943:v1.0.0`, alpine 3.18 | Imported through A within a minute; never through `e2e-b`, whose preview listed it as "1 to import" |
+| 2 (09:53), `us-east-1` only, `e2e-b` re-applied alone | `app-0943:v2.0.0`, alpine 3.19: a digest new to the org | Not imported |
+| | `app-0943:v3.0.0`, alpine 3.18: the digest of A's project, under a new tag | Not imported |
+| | `snyk-e2e/solo-0952:v1.0.0`, alpine 3.20: a repository only `us-east-1` has (the control) | Imported within a minute |
+
+- **Ruled out**: a memory of the image digest, because a new digest under the shared name was not
+  imported, and A imported a digest the org had held before. A memory of the repository alone is
+  ruled out too, because A imported a fresh name at once.
+- **Shown**: while A's project for `snyk-e2e/app-0943` exists, `e2e-b` imports nothing under that
+  repository name. Its preview disagrees with its sync. It dropped `v1.0.0` once A's project existed,
+  but kept listing `v2.0.0` and `v3.0.0`, which the sync never imported.
+- **Still open**: whether the block lifts once the first connection's projects are gone. The earlier
+  runs suggest it does not, since no later connection imported `snyk-e2e/app` after its projects were
+  deleted. After this run's cleanup the org holds no ECR target at all (call 17), so a leftover target
+  does not explain that.
+- **Cost and cleanup**: 52 closed-beta calls in the hour to 10:03. `profiles-down` deleted each
+  connection's project through provenance, then the connection, and `profiles-final` passed, leaving no
+  connection, project, or repository behind.
 
 ## Decisions from clarification (owner, 2026-11-24)
 
@@ -445,8 +471,12 @@ file's earlier sections: Registry ADR 0096 ("Activities" item 5; "Operability", 
   that state.
 - **Rationale**: verified through the public REST API on 2026-11-24 ("Provenance through the public
   REST API"); no repository-name inference anywhere (SC-003).
-- **Not yet seen**: two connections holding the same repository. Live check L4 asserts one target per
-  connection.
+- **Live result** (L4, 2026-11-24): provenance held. Each real project showed under the connection that
+  imported it, and teardown removed exactly those. But Snyk does not let two connections hold one
+  repository. The first connection to import a repository name in the org holds it, and the second
+  never imports any tag under that name ("Targeted import runs"). So `status` never has a repository to
+  show twice, and US2's case of one repository in two ECRs yields one project, under whichever
+  connection imported first. The owner decides what US2 and FR-010 become.
 
 ### R6. A connection made before the flag (question 10)
 
@@ -574,7 +604,7 @@ file's earlier sections: Registry ADR 0096 ("Activities" item 5; "Operability", 
 | L1 | The documented `PATCH` changes a connection's region and role ARN, and renames it, on a connection the e2e created (**left out** by the owner, 2026-11-24) | The `profiles` e2e step | R4, call 15 |
 | L2 | How an ECR connection made through v1 on a flagged org appears, and what works on it. Left out of the e2e: it needs a v1 create on a flagged org and cannot be removed through the API | Optional, by hand, once, on a throwaway org | R6 |
 | L3 | The closed-beta list's answer for an org ID that does not exist (**done**, 2026-11-24: `404` `Endpoint Not Found`) and for a token without access (not tried) | Read-only probes | R1 |
-| L4 | Two connections holding the same repository give one target each (**not verified**, 2026-11-24: see "Live profiles runs") | The `profiles` e2e step | R5, SC-003 |
+| L4 | Two connections holding the same repository give one target each (**done**, 2026-11-24: no. Only the first connection imports a repository name; see "Targeted import runs") | The `profiles` e2e step, then targeted runs | R5, SC-003 |
 | L5 | The closed-beta calls with an org service account's token, including the mode check on a default-mode org: a `401` or `403` there would stop default-mode runs made with such a token | Optional re-runs of the `single` and `profiles` steps | R1, R11 |
 | L6 | The closed-beta list with a token at version `2024-10-15` (**done**, 2026-11-24: `200` on a flagged org, `404` `Endpoint Not Found` on an unflagged one); the form of `links.next` is still unseen | The owner's read-only probe | R1, R2, R12 |
 | L7 | Rate-limit headers on closed-beta answers (**done**, 2026-11-24: per principal, across closed-beta APIs) | The same probe | R12 |

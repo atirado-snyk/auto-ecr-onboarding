@@ -125,6 +125,8 @@ and no call on the others' IDs. Live: the `profiles` e2e step (T042).
 
 **Independent Test**: with `FakeClient`, two connections whose targets both hold `team-a/app:v1.4.0`;
 `status` shows the project twice, once under each. Live: live check L4 in the `profiles` e2e step.
+Live result (2026-11-24): Snyk imports a shared repository through the first connection only, so the
+live case holds one project; provenance held for every real project ([research](research.md), R5).
 
 ### Tests for User Story 2
 
