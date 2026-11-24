@@ -41,10 +41,10 @@ it (Phase 0). Sources are Snyk-internal unless marked public.
 - **Provenance instead of prefix matching**: overlapping repositories across environments are expected,
   so a project's connection must come from Snyk's record, and teardown selects projects by connection.
 - **Disconnect means delete**: removing a connection deletes it; its scans stay as history.
-- **Names are required in profiles mode, with no default.** The engineer's label (typically the
-  environment) is what makes "where was this image picked up" readable. Chosen while re-scoping, in
-  line with the provenance answer; a derived default such as account plus region would carry no
-  meaning.
+- **Names default to the ECR registry URI** (owner, revising the no-default draft). The URI states
+  exactly where an image came from, and a re-run for the same ECR reaches the same connection. The
+  engineer may give another name, such as the environment. `teardown` still needs the name.
+- **Snyk's UI is out of scope**: the tool onboards through the API, and Snyk's UI follows.
 
 ## What planning must find out
 
@@ -66,3 +66,5 @@ it (Phase 0). Sources are Snyk-internal unless marked public.
 6. **What happens to extra connections if the flag is turned off.**
 7. **How the Terraform input states account access without regions** (FR-016) while the baseline's
    region-to-org map keeps working for default mode (FR-017).
+8. **Whether Snyk's `profile_name` accepts the registry URI as is** (dots, length up to 255 per the
+   ADR's column), or which documented form of it to use as the default (FR-005).

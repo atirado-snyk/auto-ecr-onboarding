@@ -35,12 +35,13 @@
   flag; provenance from Snyk's record instead of repository prefixes (former FR-011 question);
   disconnect deletes the connection and keeps scans as history (former FR-012 question, option A).
   Details in [research.md](../research.md#decisions-from-clarification-owner-2026-11-24).
-- **Decided while re-scoping, open to the owner's review**: connection names are required in profiles
-  mode, with no default (FR-005).
+- **Names (FR-005), owner 2026-11-24**: they default to the ECR registry URI for `plan` and `apply`;
+  `teardown` needs the name. **Snyk's UI**: out of scope, since the tool onboards through the API.
 - **Depends on planning**: whether Snyk exposes a project's connection (research item 1). The spec
   already defines the behavior either way: report it when available, refuse removal when not.
 - **Implementation details**: the spec names Snyk and AWS concepts and the tool's operations; the API
   facts are kept in [research.md](../research.md).
 - **Constitution**: amended to v2.0.0 in this branch before `/speckit-plan`.
-- **Validation iterations**: 2. The first draft scoped connections by region and used a derived
-  default name; both were dropped after clarification.
+- **Validation iterations**: 3. The first draft scoped connections by region and used an
+  account-plus-region default name; the second required names; the third defaults them to the
+  registry URI, which identifies the ECR rather than a region.

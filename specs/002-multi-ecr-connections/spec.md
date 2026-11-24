@@ -13,7 +13,8 @@ region is independent (orthogonal) to it. A customer might operate one ECR for e
 repositories overlap, and it should be clear where a vulnerable image was picked up. Removing a
 connection deletes it, which is the same as disconnecting, and leaves the scans as history. The tool
 works in the default behavior (one ECR per org) and, when the flag is enabled, in the new behavior
-(many ECRs per org, managed as profiles)."
+(many ECRs per org, managed as profiles)." Then: "We could have a default [name] obtained from the
+ECR URI. As long as we're using the API to onboard, Snyk UI takes care of itself."
 
 > **Relation to the baseline.** For orgs without the feature nothing changes: baseline
 > [001](../001-ecr-onboarding-baseline/spec.md) applies as written (FR-001 below). For orgs with the
@@ -38,8 +39,10 @@ flowchart TD
 In profiles mode an org holds any number of ECR connections. Each one is a **named connection**
 (Snyk calls it a profile) to one ECR registry, which is one AWS account and one region. Any mix is
 allowed: several accounts in the same region, several regions of the same account, or both. The
-region is an attribute of a connection and constrains nothing else. Names are the engineer's
-labels, typically the environment, such as `prod` or `staging`.
+region is an attribute of a connection and constrains nothing else. Each connection's name is unique
+in the org. By default it is the registry's URI, such as
+`111111111111.dkr.ecr.ap-southeast-2.amazonaws.com`, which says exactly where an image came from; the
+engineer may choose another, such as the environment (`prod`, `staging`), as in the diagram.
 
 ```mermaid
 flowchart TB
@@ -115,7 +118,8 @@ three connections, and each imports only the matching tags of its own ECR.
 3. **Given** `prod` exists, **When** `apply` runs again for `prod` with another policy, **Then** `prod`
    is reused and only its policy is replaced.
 4. **Given** an org with the feature, **When** `plan` or `apply` runs without a connection name,
-   **Then** nothing changes, and the tool lists the org's connections and asks for a name.
+   **Then** the connection is named after its registry's URI, so a re-run for the same ECR reaches the
+   same connection.
 5. **Given** an org without the feature, **When** a run names a connection, **Then** nothing changes,
    and the tool says the org is in default mode.
 
@@ -220,8 +224,10 @@ The engineer sees, in one read-only report, every connection of the org and its 
 - **A name already used in the org**, given to `apply` for a different ECR: `apply` treats it as the
   existing connection and changes its role or region only when asked, as for any existing connection.
 - **Exactly one connection in profiles mode**: it still has a name, and changes still require it.
-- **Two connections to the same ECR** under different names: allowed by the tool, but the same images
-  are then imported twice; the tool warns.
+- **Two connections to the same ECR**: with default names, a second `apply` for the same ECR reaches
+  the existing connection, so no duplicate is made. Only explicit, different names create a second
+  connection to one ECR; the tool allows it, warns that the same images will then be imported twice,
+  and changes nothing else.
 - **Snyk turns the feature off for an org with several connections**: depends on what Snyk does with
   the extra connections; decided in planning ([research](research.md), item 6).
 
@@ -242,9 +248,11 @@ The engineer sees, in one read-only report, every connection of the org and its 
 
 - **FR-004**: An org MAY hold any number of connections, to ECRs in any AWS accounts and any regions.
   No connection's account or region MAY constrain another's.
-- **FR-005**: Every operation except `status` MUST name exactly one connection. Names are chosen by the
-  engineer, are unique within the org, and have no default. Without a name, the tool MUST change
-  nothing and list the org's connections.
+- **FR-005**: Every operation except `status` MUST act on exactly one connection, identified by a name
+  unique within the org. For `plan` and `apply`, the name MUST default to the connection's ECR registry
+  URI (`<account>.dkr.ecr.<region>.amazonaws.com`, or `.amazonaws.com.cn` in China regions); the
+  engineer MAY give another. `teardown` MUST be given the name, and without one MUST change nothing
+  and list the org's connections.
 - **FR-006**: `apply` MUST create the named connection when it is missing, reuse it unchanged when it
   exists, and replace its stored role and region only when asked. It MUST NOT read or change any other
   connection's credentials, policy, or projects.
@@ -307,8 +315,9 @@ Changes to the baseline's entities:
   and attributes zero projects by repository name.
 - **SC-004**: For default-mode orgs, every acceptance scenario of baseline 001 still passes unchanged.
 - **SC-005**: Connecting another ECR for an org the account already trusts needs zero AWS changes.
-- **SC-006**: A change that names no connection on a profiles-mode org, or names one on a default-mode
-  org, changes nothing in every case.
+- **SC-006**: A teardown that names no connection on a profiles-mode org, and any run that names a
+  connection on a default-mode org, change nothing in every case.
+- **SC-007**: Re-running `apply` for the same ECR without a name reaches the same connection every time.
 
 ## Assumptions
 
@@ -320,14 +329,17 @@ Changes to the baseline's entities:
 - **Snyk keeps a record of which connection imported each project**, at least internally. Whether its
   public API exposes it decides FR-011 and FR-013, and is the first question for planning
   ([research](research.md), item 1).
-- **Inside Snyk's own UI**, showing a project's connection is Snyk's to do; customers have asked for
-  it. The tool makes provenance visible in its own output, and meaningful names make it readable
-  wherever Snyk shows a connection.
+- **Snyk's UI is out of scope** (owner, 2026-11-24). The tool onboards through Snyk's API, and how
+  Snyk's UI then presents connections and projects is Snyk's concern. The tool shows provenance in its
+  own output.
 - **Each connection presents the org ID as the external ID**, as a single connection does. To be
   confirmed in planning.
 - **A deleted connection's projects remain and stop being retested.** This matches Snyk's design notes
   and is to be verified live.
 - **Out of scope**: consolidating existing one-org-per-registry setups into a shared org, and reducing
   duplicate projects when one image exists in several ECRs.
-- **Names** follow Snyk's limits for profile names, to be confirmed in planning; environment names
-  (`prod`, `staging`) are the expected style.
+- **Names** must fit Snyk's limits for profile names. The registry URI is at most about 60 characters
+  of letters, digits, dots, and hyphens; whether Snyk accepts it as is, or a documented form of it, is
+  confirmed in planning.
+- **The registry is in the role's account**, as Snyk's setup prescribes, so the default name follows
+  from the role and the region the engineer already gives.
