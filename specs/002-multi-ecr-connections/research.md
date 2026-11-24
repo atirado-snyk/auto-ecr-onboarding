@@ -232,7 +232,8 @@ What this changes:
 
 - **Address**: the tool uses `closed-beta`, the tier documented for customers, rather than `hidden`,
   which Snyk keeps for its own apps (R2).
-- **Mode signal**: `406` on `closed-beta`, not the `404` seen on `hidden`; to be seen live (R1, L6).
+- **Mode signal**: the documentation says `406`; the live probe found `404` `Endpoint Not Found`, as on
+  `hidden` (next section, R1).
 - **Region and role**: the documented API returns neither, so the credentials read seen from the UI (a
   `hidden` call) is dropped, and the tool reads a connection's ECR from its name (third clarification
   round, R3).
@@ -240,6 +241,29 @@ What this changes:
 - **A connection made before the flag** cannot be deleted through the API (R6).
 - **Projects on delete**: the documentation and the live check disagree (R14).
 - **Rate limits and paging** (R12), and **AWS partitions** (R13).
+
+## Live probe of the closed-beta tier (2026-11-24)
+
+A read-only probe, run by the owner with his token at version `2024-10-15` (live checks L3, L6, L7):
+
+| Org | Answer |
+|-----|--------|
+| Flagged (`antonio-org`) | `200`; version served `2024-10-15`; six integrations, none of them ECR |
+| Not flagged (another of the owner's orgs) | `404` with detail `Endpoint Not Found` |
+| An org ID that does not exist | `404` with detail `Endpoint Not Found` |
+
+- **The documented `406` did not appear.** Snyk's gateway answers an org without the feature exactly as
+  it answers an org that does not exist, on `closed-beta` as on `hidden`.
+- **Entries** carry `id`, `type`, and `attributes` (`created_at`, `has_broker`, `integration_type`,
+  `profile_name`, `updated_at`); no `relationships`, which the documentation lists. `links` was `{}`
+  for a single page, so the form of a next-page link is still unseen: it needs an org with more
+  integrations than one page holds.
+- **Rate limits** are stated on every answer:
+  `X-RateLimit-Limit: 1, 1;w=1;…per_second|principal_id, 10;w=60;…per_minute|principal_id,
+  100;w=3600;…per_hour|principal_id`, with `X-RateLimit-Remaining` and `X-RateLimit-Reset` (seconds).
+  The limits are counted per principal, the identity behind the token, across every closed-beta API
+  (`api-gateway.api-closed-beta`), not per org or per call. Each answer showed `Remaining: 0` and
+  `Reset: 1`: the one-a-second allowance was used.
 
 ## Decisions from clarification (owner, 2026-11-24)
 
@@ -319,22 +343,25 @@ file's earlier sections: Registry ADR 0096 ("Activities" item 5; "Operability", 
 ### R1. Mode detection (FR-002, question 3)
 
 - **Decision**: every run starts with call 13 (`GET /closed-beta/orgs/{org}/integrations`, version
-  `2024-10-15`). `200` means profiles mode; `406` means default mode; any other answer stops the run
-  with exit 1 before any change. Default mode adds this one read and no output, so baseline output
-  stays as it is (FR-001). Live check L6 confirms both answers on `closed-beta` before the task that
-  implements the check, and records the `406` body so the tool can match more than the status.
-- **Rationale**: Snyk's beta documentation gives `406` for an org without the feature. On `hidden` the
-  same split was seen live, as `200` and `404` `Endpoint Not Found`, on one org of each kind whatever
-  connections it held ("Mode signal"). Refusing everything else keeps a flagged org from ever taking
-  the v1 path.
-- **Alternatives**: staying on `hidden`, whose signal is verified (Snyk keeps it for its own apps,
+  `2024-10-15`). `200` means profiles mode; `404` whose error detail is exactly `Endpoint Not Found`
+  means default mode; any other answer stops the run with exit 1 before any change. Default mode adds
+  this one read and no output, so baseline output stays as it is (FR-001).
+- **Rationale**: seen live on both tiers ("Mode signal"; "Live probe of the closed-beta tier"), on orgs
+  of each kind whatever connections they held. Snyk's documentation gives `406` instead; the API does
+  not. Refusing everything else keeps a flagged org from ever taking the v1 path.
+- **An org that does not exist** gets the same `404`, so the tool takes it for default mode; the run
+  then fails on its first v1 read, before any change, as in the baseline. A token without access to
+  the org is expected to behave the same way (L3, not yet tried).
+- **Alternatives**: staying on `hidden` (same signal, but undocumented and kept for Snyk's own apps,
   R2); asking the engineer for the mode (FR-002 says the org decides); inferring it from the v1
   listing (it looks the same in both modes).
-- **Residual risk**: the documentation gives `406` for a wrong address too, so a mistyped path or a
-  retired version would make a flagged org look like default mode. The path and version are one
+- **Residual risk**: a mistyped path or a retired version would most likely get the same
+  `Endpoint Not Found`, so a flagged org would look like default mode. The path and version are one
   pinned constant that a unit test asserts, and the `profiles` e2e step requires `200` on its flagged
   org, so such a change fails the live test before release. If Snyk promotes the API, moving to it is
   a deliberate change through Spec Kit.
+- **Owner action**: tell the beta team that their documentation says `406` where the API answers
+  `404`.
 
 ### R2. Snyk's closed-beta Integrations API (question 9, Principle IV)
 
@@ -481,17 +508,21 @@ file's earlier sections: Registry ADR 0096 ("Activities" item 5; "Operability", 
 ### R12. Rate limits and paging on the closed-beta tier
 
 - **Decision**: a run makes as few closed-beta calls as it can: the list once (every page, `limit=100`),
-  kept for the run, and at most one write (create, update, or delete). The transport spaces
-  closed-beta calls at least one second apart and handles `429` as it does for any call (its
-  `Retry-After`, at most 60 seconds, within its retries), then stops with a message that names Snyk's
-  closed-beta rate limit. Pages follow `links.next` on the Snyk API host only, as the baseline's
-  pagination does; the baseline adds `/rest` to a relative link, so the closed-beta list needs its own
-  prefix, whose form L6 shows. The `profiles` e2e step counts its closed-beta calls and stays under
-  100 an hour.
-- **Rationale**: the limits quoted in ADR 0084 are low, and their counting basis (token, org, or
-  tenant) is unknown. A typical run makes two or three closed-beta calls.
-- **Owner action**: ask the beta team how the limits are counted. Live check L7 records the
-  rate-limit headers, if Snyk sends any.
+  kept for the run, and at most one write (create, update, or delete). The transport paces closed-beta
+  calls by Snyk's own headers: at least one second apart, and when an answer says
+  `X-RateLimit-Remaining: 0`, the next closed-beta call waits `X-RateLimit-Reset` seconds. A wait over
+  60 seconds (the hourly allowance is spent) stops the run before its next call, saying when the
+  allowance resets; nothing is left half done, since the list comes before the one write. `429` is
+  handled as for any call (`Retry-After`, at most 60 seconds, within its retries), then the run stops
+  naming the limit. Pages follow `links.next` on the Snyk API host only, as the baseline's pagination
+  does; the baseline adds `/rest` to a relative link, so the closed-beta list accepts a link relative
+  to `/closed-beta`, one that already starts with it, or a full address on the API host, and unit tests
+  cover each.
+- **Rationale**: the limits are 1 a second, 10 a minute, and 100 an hour, counted per principal across
+  every closed-beta API (live probe, L7). The tool, the e2e harness, and any probe run with the same
+  token share them. A typical run makes two or three closed-beta calls; the `profiles` e2e step runs
+  the tool about ten times in a few minutes, so it meets the per-minute limit and waits, and it counts
+  its closed-beta calls to stay under 100 an hour.
 
 ### R13. AWS partitions
 
@@ -517,9 +548,9 @@ file's earlier sections: Registry ADR 0096 ("Activities" item 5; "Operability", 
 |----|------|-----|---------|
 | L1 | The documented `PATCH` changes a connection's region and role ARN, and renames it, on a connection the e2e created | The `profiles` e2e step | R4, call 15 |
 | L2 | How an ECR connection made through v1 on a flagged org appears, and what works on it. Left out of the e2e: it needs a v1 create on a flagged org and cannot be removed through the API | Optional, by hand, once, on a throwaway org | R6 |
-| L3 | The closed-beta list's answer for an org ID that does not exist and for a token without access | Two read-only probes | R1's refusal messages |
+| L3 | The closed-beta list's answer for an org ID that does not exist (**done**, 2026-11-24: `404` `Endpoint Not Found`) and for a token without access (not tried) | Read-only probes | R1 |
 | L4 | Two connections holding the same repository give one target each | The `profiles` e2e step | R5, SC-003 |
 | L5 | The closed-beta calls with an org service account's token | Optional re-run of the `profiles` step | R11 |
-| L6 | The closed-beta list with a token at version `2024-10-15`: `200` on a flagged org, `406` and its body on an unflagged one, and the form of `links.next` | A read-only probe on the owner's machine, before the mode-check task | R1, R2, R12 |
-| L7 | Rate-limit headers on closed-beta answers | The same probe | R12 |
+| L6 | The closed-beta list with a token at version `2024-10-15` (**done**, 2026-11-24: `200` on a flagged org, `404` `Endpoint Not Found` on an unflagged one); the form of `links.next` is still unseen | The owner's read-only probe | R1, R2, R12 |
+| L7 | Rate-limit headers on closed-beta answers (**done**, 2026-11-24: per principal, across closed-beta APIs) | The same probe | R12 |
 | L8 | The projects of a deleted connection: gone, or left orphaned | The `profiles` e2e step | R14 |

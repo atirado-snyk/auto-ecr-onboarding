@@ -27,7 +27,8 @@ Run the baseline's live check unchanged, from `examples/sandbox/`:
 ```
 
 **Expected**: as in the baseline's [quickstart](../001-ecr-onboarding-baseline/quickstart.md): every
-step passes, the mode check sees a default-mode org (`406`), and nothing is left behind.
+step passes, the mode check sees a default-mode org (`404`, `Endpoint Not Found`), and nothing is
+left behind.
 
 ## 3. Profiles mode, live (Constitution Principle VII)
 
@@ -45,7 +46,7 @@ export E2E_PROFILE_ORG_ID=<flagged-org-uuid>
 
 | Step | What it proves | Requirement |
 |------|----------------|-------------|
-| Preflight refuses a default-mode org (`406`), or one that already has an ECR connection; it requires `200` on this org | Safety of the run; the closed-beta address | R1, R10 |
+| Preflight refuses a default-mode org (`404`, `Endpoint Not Found`), or one that already has an ECR connection; it requires `200` on this org | Safety of the run; the closed-beta address | R1, R10 |
 | `apply` without a name for region A creates a connection named after its registry address | Default names | FR-005, US1/AC4 |
 | `apply --connection e2e-b` for region B creates `e2e-b <region B's address>`; the first is untouched | Several ECRs, one org; labels | FR-004, FR-006, US1/AC2 |
 | Re-running `apply` without a name for region A reaches the same connection | Same ECR, same connection | SC-007 |
@@ -56,7 +57,7 @@ export E2E_PROFILE_ORG_ID=<flagged-org-uuid>
 | `teardown --connection <region A's address> --delete-connection`: the dry run names the project count; with `--yes` the connection goes, its project is gone (or the run records it orphaned), and `e2e-b` is unchanged | Disconnect | FR-014, SC-002, US3/AC3, US3/AC4, live check L8 |
 | `apply --connection e2e-b --update-credentials` with region A repoints it and renames it `e2e-b <region A's address>`; its connection test lists region A's repositories | Repoint | FR-006, live check L1 |
 | `teardown --connection e2e-b --delete-connection --yes` | Disconnect the second | FR-014 |
-| The step's closed-beta calls stay under 100 in the hour, with no `429` left unretried | Rate limits | R12, live check L7 |
+| The step's closed-beta calls stay under 100 in the hour, pacing by Snyk's rate-limit headers, with no `429` left unretried | Rate limits | R12 |
 | `final`: the org holds no ECR connection; the role and the repositories are gone | Nothing left behind | SC-006 |
 
 A connection made before the flag (`Default profile`) is not created here: it needs a v1 create on a

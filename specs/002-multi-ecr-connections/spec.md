@@ -390,9 +390,9 @@ Changes to the baseline's entities:
 - **Snyk enables the feature per org.** It is a closed beta for Enterprise customers, who ask their
   Snyk account team with the IDs of the orgs to enable; engineers cannot turn it on themselves.
 - **Snyk's API shows the org's mode.** Its list of connections answers for an org with the feature and
-  refuses an org without it, whatever connections the org holds. Verified live on 2026-11-24 on one org
-  of each kind through the UI's address; Snyk's beta docs give a different refusal (`406`) on the
-  customers' address, to be verified ([research](research.md), R1).
+  refuses an org without it, whatever connections the org holds. Verified live on 2026-11-24 on orgs of
+  each kind, on the UI's address and on the customers' address; the refusal is the one an org that
+  does not exist also gets, not the one Snyk's beta docs give ([research](research.md), R1).
 - **The tool manages connections in profiles mode through Snyk's closed-beta Integrations API**, at the
   address and version Snyk's beta documentation gives its customers. Snyk's UI also offers "Create new
   ECR profile" with the same fields (name, region, role ARN), observed on 2026-11-24, so connections

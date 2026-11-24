@@ -34,7 +34,7 @@ the same registry only under explicit, different names.
 | Value | Signal | Effect |
 |-------|--------|--------|
 | `profiles` | `200` | Connections through calls 13 to 16; v1 calls 1 to 4 are never made |
-| `default` | `406`, matched as live check L6 records it | The baseline, unchanged |
+| `default` | `404` with error detail exactly `Endpoint Not Found` | The baseline, unchanged. An org that does not exist gets the same answer; its first v1 read then fails, before any change |
 | none | any other answer | The run stops with exit 1 before any change |
 
 Taken on every run, never cached across runs, never chosen by the engineer.

@@ -64,10 +64,9 @@ mode is unchanged (FR-001), since the harness and operators parse it.
 **Scale/Scope**: tens of connections per org at most; provenance reads every target of the org once
 per run.
 
-**Open before implementation**: live check L6 (the closed-beta address, version, and mode signal with a
-token), before the mode-check task; L1 (the update call) before the task that implements it; and the
-other live checks ([research](research.md#live-checks-before-or-during-implementation)). None blocks
-the design.
+**Open before implementation**: L1 (the update call) before the task that implements it, and the other
+live checks ([research](research.md#live-checks-before-or-during-implementation)). L6, the closed-beta
+address, version, and mode signal with a token, passed on 2026-11-24. None blocks the design.
 
 ## Constitution Check
 
@@ -82,7 +81,7 @@ v2.0.0.
 | IV. Snyk's terms and published contracts | Published request shapes only, or undocumented behavior marked and verified live | **Violation, justified** | Calls 13 to 16 use the `closed-beta` tier, documented only to beta customers: [Complexity Tracking](#complexity-tracking) |
 | V. Offline verification | `make check` green with no network or credentials | Pass by design | `FakeClient` covers calls 13 to 17; no test reaches Snyk or AWS |
 | VI. Secrets stay out | Token only to `*.snyk.io`; no real IDs in the repository | Pass | The closed-beta tier is on the same API host, and its page links are followed only there; the research uses placeholder IDs |
-| VII. Claim only what was verified | Verified, live, and unverified kept apart | Pass | [contracts/snyk-api.md](contracts/snyk-api.md) marks each call; none is yet verified on `closed-beta` (live checks L6 and L1) |
+| VII. Claim only what was verified | Verified, live, and unverified kept apart | Pass | [contracts/snyk-api.md](contracts/snyk-api.md) marks each call; call 13 verified on `closed-beta` (live check L6); calls 14 to 16 not yet (L1 and the e2e) |
 | VIII. Spec is the contract | Spec, diagrams, and contracts before code | Pass | This plan and its contracts precede any code |
 | Invariant: connections per org | Mode from Snyk, never guessed; one connection per change | Pass | [research R1](research.md#r1-mode-detection-fr-002-question-3), R3 |
 | Invariant: provenance from Snyk | Never from repository names | Pass | [research R5](research.md#r5-provenance-fr-009-to-fr-011-fr-013) |
@@ -102,7 +101,7 @@ v2.0.0.
 flowchart TD
     run(["A run against one org"]) --> m["Call 13: GET closed-beta integrations list"]
     m -->|"200"| prof["Profiles mode"]
-    m -->|"406"| def["Default mode: baseline 001, unchanged, v1 plus REST"]
+    m -->|"404, Endpoint Not Found"| def["Default mode: baseline 001, unchanged, v1 plus REST"]
     m -->|"anything else"| stop(["Stop, exit 1, nothing changed"])
     prof --> conn["Connections: closed-beta calls 13 to 16"]
     prof --> sync["Sync, preview, policy: REST calls 5 to 10, with the connection's ID"]
@@ -243,6 +242,6 @@ closed-beta calls kept together so they can be moved to a published API in one p
 **Conditions attached to the exception**, taken from Principle IV's own clause for undocumented
 behavior: the calls live together in one section of `SnykClient`; the docs and
 [contracts/snyk-api.md](contracts/snyk-api.md) mark them as closed beta; each is verified live before
-release, the mode check not before live check L6 and call 15 not before L1; the API version is
+release (the mode check passed live check L6), and call 15 not before L1; the API version is
 pinned; the calls are paced under the closed-beta rate limits; moving to a published API is a planned
 change through Spec Kit, not a silent one.
