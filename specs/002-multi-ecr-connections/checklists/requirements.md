@@ -40,8 +40,9 @@
 - **Reopened and resolved 2026-11-24**: FR-014. Snyk's UI says deleting a profile deletes all of its
   projects, which conflicted with "delete and keep the scans as history". The owner chose to do what
   the product does: disconnect deletes the connection and its projects, and a pause keeps results.
-- **Depends on planning**: whether Snyk exposes a project's connection (research item 1). The spec
-  already defines the behavior either way: report it when available, refuse removal when not.
+- **Planning questions answered since, live on 2026-11-24**: Snyk exposes a project's connection
+  (research item 1) and the org's mode (item 3). The refusal paths for a project without that record
+  stay as a safeguard.
 - **Implementation details**: the spec names Snyk and AWS concepts and the tool's operations; the API
   facts are kept in [research.md](../research.md).
 - **Constitution**: amended to v2.0.0 in this branch before `/speckit-plan`.

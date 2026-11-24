@@ -328,6 +328,9 @@ Changes to the baseline's entities:
 
 - **Snyk enables the feature per customer.** It is a closed beta, for ECR, offered to Enterprise
   customers; engineers cannot turn it on themselves.
+- **Snyk's API shows the org's mode.** Its list of connections answers for an org with the feature and
+  refuses an org without it, whatever connections the org holds. Verified live on 2026-11-24 on one org
+  of each kind ([research](research.md), question 3).
 - **The tool manages connections in profiles mode through Snyk's API.** Snyk's UI also offers "Create
   new ECR profile" with the same fields (name, region, role ARN), observed on 2026-11-24, so
   connections made either way are the same kind of object.
@@ -347,7 +350,7 @@ Changes to the baseline's entities:
 - **Out of scope**: consolidating existing one-org-per-registry setups into a shared org, and reducing
   duplicate projects when one image exists in several ECRs.
 - **Names** must fit Snyk's limits for profile names. The registry URI is at most about 60 characters
-  of letters, digits, dots, and hyphens; whether Snyk accepts it as is, or a documented form of it, is
-  confirmed in planning.
+  of letters, digits, dots, and hyphens. Snyk accepted it as is on 2026-11-24
+  ([research](research.md), question 8).
 - **The registry is in the role's account**, as Snyk's setup prescribes, so the default name follows
   from the role and the region the engineer already gives.

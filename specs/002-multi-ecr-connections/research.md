@@ -144,6 +144,30 @@ assert it.
   https://api.snyk.io/hidden/orgs/{org}/integrations/{id}?version=2024-10-15` returned `204`, and the
   imported project was already `404` at the first check, seconds later. FR-014 holds through the API.
 
+### Mode signal: the hidden list on an org without the flag (2026-11-24)
+
+During the default-mode end-to-end run (`e2e.sh single` at `f035a43`, a throwaway org in the Snyk APJ
+group, US tenant), while that org's ECR integration was connected through v1 and syncing, the same
+token read the hidden list for both orgs within one minute:
+
+| Org | Flag | ECR connections | `GET /hidden/orgs/{org}/integrations?version=2024-10-15` |
+|-----|------|-----------------|---------------------------------------------------------|
+| Throwaway org | off | one, connected through v1 | `404`, `errors[0].detail: "Endpoint Not Found"`, no `title` |
+| `antonio-org` | on | none (the test profile was deleted) | `200`, six integrations, none of them ECR |
+
+- **The flag gates the endpoint, not its contents.** The flagged org answers `200` with no ECR
+  connection, and the unflagged org answers `404` while it has one. The answer tells the modes apart
+  where the v1 view cannot.
+- **This 404 is not the generic one.** A path Snyk does not route (the same list under `/rest/`)
+  answered `404` with `title` and `detail` both `"Not Found"`.
+- **Not yet seen**: the answer for an org ID that does not exist or that the token cannot read, for a
+  token without the needed permissions, and on the EU and AU tenants.
+
+**Question 3 is answered, with a caveat for planning.** `200` is the profiles-mode signal and `404`
+with `Endpoint Not Found` the default-mode signal. Misreading a flagged org as default mode would send
+it down the v1 path, which FR-002 forbids, so the plan should accept only those two answers and stop on
+anything else.
+
 ### What the profile settings page's code says (from the HAR's JavaScript bundle)
 
 - **Deleting a profile deletes its projects.** The page's text: "This will permanently delete your
@@ -185,8 +209,10 @@ assert it.
    The public API reference has no page for it (`docs.snyk.io/snyk-api/reference/integrations`
    returned 404 on 2026-11-24). Likely sources: the beta documentation given to enrolled customers,
    or Snyk's internal OpenAPI spec.
-3. **How the tool tells an org's mode** (FR-002): for example whether the REST listing answers
-   differently for orgs without the flag, or whether Snyk exposes the flag.
+3. ~~How the tool tells an org's mode (FR-002).~~ Answered on 2026-11-24: the hidden list answers
+   `200` when the flag is on and `404` `Endpoint Not Found` when it is off, whatever connections the
+   org holds (see "Mode signal"). Still to see: the answers for an unknown org, a token without
+   access, and the EU and AU tenants.
 4. ~~Whether the external ID stays the org ID.~~ Answered on 2026-11-24: it does.
 5. ~~What `DELETE` does to the connection's projects.~~ Answered on 2026-11-24: it deletes them at
    once (`204`, project `404` seconds later), matching the UI's text and FR-014.
