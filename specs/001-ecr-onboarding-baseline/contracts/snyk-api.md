@@ -2,8 +2,8 @@
 
 Every call the script makes, as delivered at `f035a43`. This is the complete list: a call that is
 not here is not made. Permissions are as `docs/USAGE.md` lists them from the published v1 OpenAPI
-spec and the REST spec `2026-03-25`; requests are sent with REST version `2025-09-17` by default
-([research O1](../research.md#open-items)).
+spec and the REST spec `2026-03-25`; requests are sent with REST version `2025-09-17` by default,
+which passed live on 2026-11-24 ([research O1](../research.md#open-items)).
 
 ## Calls
 

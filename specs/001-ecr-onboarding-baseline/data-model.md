@@ -5,6 +5,10 @@ the code sees them. The spec's [Key Entities](spec.md#key-entities) describe the
 without the field names; the spec's [lifecycle diagram](spec.md#overview) shows how one registry's
 onboarding moves between states.
 
+**Terms**: the spec's *ECR connection* is Snyk's *ECR integration*, the name the code, the plan, and
+the tasks use. The spec's *read proof* is the *connection test*: an ImportAll dry run that imports
+nothing.
+
 ## Relationships
 
 ```mermaid

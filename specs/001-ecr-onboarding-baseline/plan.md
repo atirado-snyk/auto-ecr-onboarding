@@ -66,7 +66,7 @@ v1.0.0.
 | I. Starting state never touched | Deletes limited to policy, credentials, prefixed projects; enforced by a test | Pass | `test_only_integration_scoped_deletes_ever_happen_never_the_org`; no org or registry call in `SnykClient` |
 | II. Standard tooling | Terraform plus a standard-library script; no custom runtime | Pass | Script imports; `README.md` intro |
 | III. Safe by default | Read-only counterparts, `--yes`, idempotent, no default policy, image limit | Pass | FR-010, FR-017, FR-022, FR-025 rows below |
-| IV. Snyk's own terms | Snyk vocabulary, published specs, undocumented behavior marked and verified | Pass, one open item | Request version `2025-09-17` differs from the REST spec version the docs cite, `2026-03-25` ([research O1](research.md#open-items)) |
+| IV. Snyk's own terms | Snyk vocabulary, published specs, undocumented behavior marked and verified | Pass, one open item | Requests are sent as `2025-09-17`, which passed live on 2026-11-24, while the docs cite the REST spec `2026-03-25` as checked ([research O1](research.md#open-items)); task T038 settles which is the contract, before feature 002 builds on the same version |
 | V. Offline verification | `make check` green with no network or credentials | Pass | Re-run 2026-11-24 on `f035a43` |
 | VI. Secrets stay out | Token from env only, Snyk hosts only, never printed; real values gitignored | Pass | FR-030 and FR-031 rows; `.gitignore` covers `*.auto.tfvars` |
 | VII. Claim only what was verified | Verified, live, and unverified kept apart | Pass | `README.md` Status; [spec Verification Status](spec.md#verification-status) |
@@ -231,7 +231,8 @@ directories because they run separately: Terraform once per account, the script 
 Offline evidence names the unit tests (in `tests/test_onboard_ecr.py` unless stated) or `terraform
 test` runs that assert the requirement. Live evidence refers to the e2e steps in
 [docs/TESTING.md](../../docs/TESTING.md), US tenant: every scenario on 2026-10-19 (from the working
-tree later committed as `f035a43`), and `e2e.sh single` on 2026-11-24 at `f035a43`.
+tree later committed as `f035a43`), and the steps of `e2e.sh single`, in order, on 2026-11-24 at
+`f035a43`.
 
 | FR | Implemented in | Offline evidence | Live evidence |
 |----|----------------|------------------|---------------|

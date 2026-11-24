@@ -86,7 +86,7 @@ the org has a project for `v1.0.0` and none for `latest`.
 - [X] T017 [US1] Implement the v1 integration calls in `SnykClient` and `ensure_integration` in scripts/onboard_ecr.py: reuse an existing ECR integration unchanged, create a missing one with retries while IAM propagates, replace the credentials only with `--update-credentials`, and never retry 401, 403, or 404 (FR-004, FR-011, FR-013, FR-016)
 - [X] T018 [US1] Implement the REST dry-run calls and `run_dry_run`, `checked_dry_run`, `connection_test`, and `summarise` in scripts/onboard_ecr.py: the ImportAll connection test before the preview, propagation retries only for credentials set in this run, and the hints that name the org missing from the trust list (FR-012 to FR-014, FR-021)
 - [X] T019 [US1] Implement `plan` and `apply` in `run` in scripts/onboard_ecr.py: `plan` writes nothing, `--no-sync`, the `--max-images` guard (exit 2) with `--force`, `apply_policy` (POST, then PATCH on 409), and an omitted schedule left to Snyk (FR-010, FR-015, FR-022, FR-023; depends on T016 to T018)
-- [X] T020 [US1] Script the live steps `infra-up`, `preflight`, and `new` in examples/sandbox/e2e.sh, with throwaway orgs from examples/sandbox/harness.py and the test repositories in examples/sandbox/fixture/main.tf; `./e2e.sh single` last passed on 2026-11-24 at `f035a43`
+- [X] T020 [US1] Script the live steps `infra-up`, `preflight`, and `new` in examples/sandbox/e2e.sh, with throwaway orgs from examples/sandbox/harness.py and the test repositories in examples/sandbox/fixture/main.tf; the steps of `./e2e.sh single` last passed, in order, on 2026-11-24 at `f035a43`
 
 **Checkpoint**: one registry onboards end to end. This was the MVP.
 
@@ -149,7 +149,7 @@ the credentials. Afterwards Snyk can no longer read the registry, and the org st
 
 - [X] T035 [P] Write the operator docs README.md and docs/USAGE.md, and the test guide docs/TESTING.md
 - [X] T036 [P] Write the harness's safety checks in examples/sandbox/harness.py (for example `delete-org --protect`) and their 12 tests in tests/test_harness.py
-- [X] T037 Run `make check` with no network and no credentials (Principle V): 86 unit tests, 5 `terraform test` runs, `fmt`, and `validate`; it last passed on 2026-11-24 at `f035a43`
+- [X] T037 Run `make check` with no network and no credentials (Principle V): 86 unit tests, 5 `terraform test` runs, `fmt`, and `validate`, in under a minute (SC-008); it last passed on 2026-11-24 at `f035a43`
 - [ ] T038 Choose the REST version the docs name as the contract, then align `DEFAULT_REST_VERSION` in scripts/onboard_ecr.py with README.md and docs/USAGE.md; moving the default needs an e2e run (research O1; Principle IV)
 - [ ] T039 [P] Replace the connection test's sample output in docs/USAGE.md, step 3, with the script's form from contracts/cli.md (research O2)
 - [ ] T040 [P] Declare the minimum Python version as PEP 723 inline script metadata in scripts/onboard_ecr.py, and run the unit tests on that version (research O3)
@@ -234,7 +234,7 @@ The open tasks, cheapest first:
 
 ### The next behavior change
 
-Feature 002 runs the full cycle in `specs/002-multi-ecr-connections/` and replaces FR-016 when it is
+Feature 002 runs the full cycle on branch `002-multi-ecr-connections` and replaces FR-016 when it is
 delivered.
 
 ---

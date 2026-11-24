@@ -129,7 +129,8 @@ Snyk changes any of these, the named part of the tool breaks first.
 - **O1. Which REST version is the contract?** Requests default to `2025-09-17` (`DEFAULT_REST_VERSION`,
   also used by the tests), while `README.md` and `docs/USAGE.md` say request shapes and permissions
   were checked against the REST spec `2026-03-25`. Constitution Principle IV asks the docs to name the
-  version they were checked against, so pick one. Moving the default needs an e2e run.
+  version they were checked against, so pick one. Moving the default needs an e2e run. Requests at
+  `2025-09-17` passed live on 2026-11-24 (task T038).
 - **O2. Documentation drift in the connection test output.** `docs/USAGE.md` step 3 shows
   `Snyk can read the registry: 12 repositories, 87 images visible`; the script prints
   `Snyk can read the registry: N repositories with tagged images (M tags) visible; nothing imported.`
