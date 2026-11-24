@@ -58,6 +58,44 @@ it (Phase 0). Sources are Snyk-internal unless marked public.
   A create with a real, trusted role and the default name format, followed by a delete, would prove
   the name.
 
+## Observed API calls (Snyk UI, sanitized HAR, 2026-11-24)
+
+The owner created profile `123456789012.dkr.ecr.us-east-1.amazonaws.com` in `antonio-org` (region
+`us-east-1`, role `arn:aws:iam::123456789012:role/snyk-ecr-read`, which trusts only `antonio-org`). It
+saved, and the UI shows it as connected with integration ID `<profile-id>`.
+The UI calls `app.snyk.io/api/…`, its proxy to Snyk's API:
+
+| Call | Request | Response |
+|------|---------|----------|
+| Create | `POST hidden/orgs/{org}/integrations?version=2024-10-15`, JSON:API body `{"data": {"type": "integration", "attributes": {"integration_type": "ecr", "profile_name": "…", "credentials": {"region": "…", "role_arn": "…"}}}}` | `201`: `data.id`, and `attributes` `integration_type`, `profile_name`, `has_broker`, `created_at`, `updated_at` |
+| Read credentials | `GET hidden/orgs/{org}/integrations/{id}/credentials?version=2024-10-15` | `200`: `integration_type`, `region`, `role_arn` |
+| Read status | `GET hidden/orgs/{org}/integrations/{id}/status?version=2024-10-15` | `200`: `connection_status: "valid"` |
+| Read settings | `GET hidden/orgs/{org}/integrations/{id}/settings?version=2024-10-15` | `200`: `container_app_scan_enabled: true` |
+| Read sync policy | `GET rest/orgs/{org}/container_import/{id}/policy?version=2023-10-11~experimental` | `404`: no policy yet |
+
+What this settles:
+
+- **Question 8 (names)**: answered. Snyk accepted the registry URI as `profile_name` unchanged, dots
+  included.
+- **Question 2 (API shape)**: create and three reads are known. Credentials use `role_arn`, where v1
+  uses `roleArn`.
+- **The sync API serves profiles**: `container_import/{id}` takes the profile's integration ID, so
+  the per-connection sync needs no new API.
+- **A cheap connection check exists**: `…/status` reports `connection_status`. The dry-run connection
+  test stays more useful, since it also lists repositories and tags, but `status` could serve the
+  `status` mode.
+
+What it raises:
+
+- **The integrations API is in Snyk's `hidden` tier**: unpublished, with no public spec or stability
+  promise. Constitution Principle IV requires published contracts, so the plan must record this as a
+  justified exception in its Complexity Tracking table, or wait for a published version.
+- **Token access is unverified**: the UI authenticates with a session, while the tool sends
+  `Authorization: token …` to `api.snyk.io`. The next check is a read-only list call with the token
+  (`GET https://api.snyk.io/hidden/orgs/{org}/integrations?version=2024-10-15`).
+- **Still open**: list, update, and delete shapes; the token permissions needed; the mode signal
+  (question 3); provenance (question 1).
+
 ## Decisions from clarification (owner, 2026-11-24)
 
 - **Scope**: several ECRs per org; the region is an attribute of a connection and orthogonal to the
@@ -91,5 +129,7 @@ it (Phase 0). Sources are Snyk-internal unless marked public.
 6. **What happens to extra connections if the flag is turned off.**
 7. **How the Terraform input states account access without regions** (FR-016) while the baseline's
    region-to-org map keeps working for default mode (FR-017).
-8. **Whether Snyk's `profile_name` accepts the registry URI as is** (dots, length up to 255 per the
-   ADR's column), or which documented form of it to use as the default (FR-005).
+8. ~~Whether Snyk's `profile_name` accepts the registry URI as is.~~ Answered on 2026-11-24: it does
+   (see "Observed API calls").
+9. **Whether the hidden integrations API accepts token authentication** at `api.snyk.io`, and whether
+   Snyk will publish it; this decides how the plan meets Principle IV.
