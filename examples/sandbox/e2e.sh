@@ -40,7 +40,8 @@
 #   E2E_ORG_ID=<uuid> use an existing org as org a instead of creating one (single only; it is never deleted
 #   and must have no ECR integration); E2E_PAUSE=0 skip the pause; E2E_ASSUME_YES=1 skip confirmations;
 #   VERIFY_TIMEOUT seconds to wait for each sync (default 600); FINAL_TIMEOUT seconds to wait for the org
-#   deletions to show (default 180); E2E_POLL_SECONDS seconds between status checks while waiting (default 60).
+#   deletions to show (default 180); E2E_POLL_SECONDS seconds between status checks while waiting (default 60);
+#   E2E_REPO_NAME the test repository (default snyk-e2e/app; it must start with snyk-e2e/).
 # Snyk's closed-beta APIs allow 1 call a second, 10 a minute, and 100 an hour per token, and every run of the tool
 # makes at least one (its mode check). The steps keep count in .e2e/closed_beta.log, warn above 80 in the last
 # hour, and stop above 100; the profiles steps space their runs at least 6 seconds apart.
@@ -52,7 +53,7 @@ REGION_A="${AWS_REGION:-ap-southeast-2}"
 REGION_B="${E2E_REGION_B:-us-east-1}"
 STATE=.e2e
 ROLE_NAME="snyk-ecr-e2e"
-REPO_NAME="snyk-e2e/app"
+REPO_NAME="${E2E_REPO_NAME:-snyk-e2e/app}" # a fresh name per run keeps Snyk's sync history of earlier runs out
 REPO_PREFIX="snyk-e2e/"
 ORGS_FILE="snyk-orgs.auto.tfvars" # what a user keeps in their repository once there is more than one region
 ALL_SLOTS="a b n c d"
@@ -60,6 +61,7 @@ ALL_SLOTS="a b n c d"
 SYNC_POLICY=(--import-policy Regex --repo '^snyk-e2e/' --tag '^v[0-9]+\.[0-9]+\.[0-9]+$')
 VERIFY_TIMEOUT="${VERIFY_TIMEOUT:-600}"
 FINAL_TIMEOUT="${FINAL_TIMEOUT:-180}"
+[[ "${REPO_NAME}" == snyk-e2e/* ]] || { echo "E2E_REPO_NAME must start with snyk-e2e/" >&2; exit 1; }
 ONBOARD=(uv run ../../scripts/onboard_ecr.py)
 HARNESS=(uv run harness.py)
 PUSH_IMAGE=(uv run push_image.py)

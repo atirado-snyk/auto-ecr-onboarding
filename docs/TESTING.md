@@ -42,7 +42,9 @@ export SNYK_TOKEN=...
 E2E_PROFILE_ORG_ID=<org-with-profiles> ./e2e.sh profiles   # several connections in one org (feature 002)
 ```
 
-Unattended: add `E2E_PAUSE=0` (no pause in `full` and `single`); `profiles` never pauses.
+Unattended: add `E2E_PAUSE=0` (no pause in `full` and `single`); `profiles` never pauses. To repeat a run in
+the same org, give the test repository a fresh name with `E2E_REPO_NAME=snyk-e2e/app-<suffix>`: Snyk's sync
+did not import the same image again in an org where an earlier connection had imported it (2026-11-24).
 
 ### Snyk's closed-beta rate limits
 

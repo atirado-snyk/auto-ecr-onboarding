@@ -174,6 +174,19 @@ class PushImageTests(unittest.TestCase):
         self.assertNotIn(PASSWORD, str(cm.exception))
         self.assertIn("HTTP 401", str(cm.exception))
 
+    def test_another_alpine_version_can_be_the_source(self):
+        fake = FakeRegistries()
+        original = fake.__call__
+        seen = []
+
+        def spy(method, url, headers, body):
+            seen.append(url)
+            return original(method, url.replace("/manifests/3.19", "/manifests/3.18"), headers, body)
+
+        self.assertEqual(pi.main(["--source-tag", "3.19", DEST, "v1.0.1"], stdin_text=PASSWORD, send=spy), 0)
+        self.assertTrue(any(u.endswith("/library/alpine/manifests/3.19") for u in seen))
+        self.assertEqual(pi.main(["--source-tag", "latest;rm", DEST, "v1"], stdin_text=PASSWORD, send=spy), 1)
+
     def test_main_reads_the_password_from_stdin_only(self):
         self.assertEqual(pi.main([DEST, "v1.0.0"], stdin_text="", send=FakeRegistries()), 1)
         self.assertEqual(pi.main([DEST, "v1.0.0"], stdin_text=PASSWORD + "\n", send=FakeRegistries()), 0)

@@ -2,7 +2,7 @@
 """Copy the e2e test image into an ECR repository over the registry HTTP API, without Docker.
 
     aws ecr get-login-password --region <region> | \
-        uv run push_image.py <account>.dkr.ecr.<region>.amazonaws.com/<repository> v1.0.0 latest
+        uv run push_image.py [--source-tag 3.18] <account>.dkr.ecr.<region>.amazonaws.com/<repository> v1.0.0 latest
 
 The image is the one e2e.sh pushes with Docker when a Docker engine is running: alpine 3.18 for
 linux/amd64 from Docker Hub. When Docker Hub refuses with HTTP 429 (its anonymous pulls are counted
@@ -102,7 +102,8 @@ def _checked(data: bytes, digest: str) -> bytes:
     return data
 
 
-def _pull_manifest(send: Send, source: tuple[str, str, str, str], public_ecr_password: str | None) -> tuple[str, str, str, bytes]:
+def _pull_manifest(send: Send, source: tuple[str, str, str, str], public_ecr_password: str | None,
+                   source_tag: str = SOURCE_TAG) -> tuple[str, str, str, bytes]:
     """(pull authorization, source repository URL, manifest media type, manifest bytes) for linux/amd64."""
     _, token_url, base, repository = source
     auth = None
@@ -113,13 +114,13 @@ def _pull_manifest(send: Send, source: tuple[str, str, str, str], public_ecr_pas
     pull = f"Bearer {answer.get('token') or answer['access_token']}"
     src = f"{base}/v2/{repository}"
     accept = {"Accept": ", ".join(INDEX_TYPES + MANIFEST_TYPES)}
-    headers, body, _ = _request(send, "GET", f"{src}/manifests/{SOURCE_TAG}", pull, accept)
+    headers, body, _ = _request(send, "GET", f"{src}/manifests/{source_tag}", pull, accept)
     media_type = (_header(headers, "Content-Type") or json.loads(body).get("mediaType") or "").split(";")[0]
     if media_type in INDEX_TYPES:
         entry = next((m for m in json.loads(body)["manifests"]
                       if all(m.get("platform", {}).get(k) == v for k, v in PLATFORM.items())), None)
         if entry is None:
-            raise RuntimeError(f"{repository}:{SOURCE_TAG} has no {PLATFORM['os']}/{PLATFORM['architecture']} image")
+            raise RuntimeError(f"{repository}:{source_tag} has no {PLATFORM['os']}/{PLATFORM['architecture']} image")
         headers, body, _ = _request(send, "GET", f"{src}/manifests/{entry['digest']}", pull,
                                     {"Accept": ", ".join(MANIFEST_TYPES)})
         body = _checked(body, entry["digest"])
@@ -130,13 +131,13 @@ def _pull_manifest(send: Send, source: tuple[str, str, str, str], public_ecr_pas
 
 
 def copy_image(dest: str, tags: list[str], password: str, send: Send = http_send,
-               public_ecr_password: str | None = None) -> str:
+               public_ecr_password: str | None = None, source_tag: str = SOURCE_TAG) -> str:
     """Copy the source image's linux/amd64 manifest and blobs to dest under every tag; returns its digest."""
     ecr, repository = parse_destination(dest)
     push = "Basic " + base64.b64encode(f"AWS:{password}".encode()).decode()
     for i, source in enumerate(SOURCES):
         try:
-            pull, src, media_type, body = _pull_manifest(send, source, public_ecr_password)
+            pull, src, media_type, body = _pull_manifest(send, source, public_ecr_password, source_tag)
             break
         except RuntimeError as err:
             if "HTTP 429" not in str(err) or i == len(SOURCES) - 1:
@@ -169,8 +170,11 @@ def copy_image(dest: str, tags: list[str], password: str, send: Send = http_send
 
 
 def main(argv: list[str] | None = None, stdin_text: str | None = None, send: Send = http_send) -> int:
-    args = sys.argv[1:] if argv is None else argv
-    if len(args) < 2:
+    args = list(sys.argv[1:] if argv is None else argv)
+    source_tag = SOURCE_TAG
+    if args[:1] == ["--source-tag"] and len(args) > 1:
+        source_tag, args = args[1], args[2:]
+    if len(args) < 2 or not re.fullmatch(r"[0-9]+\.[0-9]+(\.[0-9]+)?", source_tag):
         print(__doc__, file=sys.stderr)
         return 1
     password = (sys.stdin.read() if stdin_text is None else stdin_text).strip()
@@ -180,7 +184,7 @@ def main(argv: list[str] | None = None, stdin_text: str | None = None, send: Sen
         return 1
     try:
         digest = copy_image(args[0], args[1:], password, send=send,
-                            public_ecr_password=os.environ.get("PUBLIC_ECR_PASSWORD") or None)
+                            public_ecr_password=os.environ.get("PUBLIC_ECR_PASSWORD") or None, source_tag=source_tag)
     except (ValueError, RuntimeError, KeyError) as err:
         print(f"error: {err}", file=sys.stderr)
         return 1
