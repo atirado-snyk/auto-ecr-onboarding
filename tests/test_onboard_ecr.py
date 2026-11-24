@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import unittest.mock
 import urllib.error
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "scripts"))
@@ -18,6 +19,7 @@ import onboard_ecr as o  # noqa: E402
 ORG = "11111111-1111-1111-1111-111111111111"
 ROLE = "arn:aws:iam::123456789012:role/snyk-ecr-read"
 INTEGRATION = "22222222-2222-2222-2222-222222222222"
+DEFAULT_MODE_ANSWER = {"errors": [{"status": "404", "detail": "Endpoint Not Found"}]}
 
 
 class FakeClient(o.SnykClient):
@@ -26,6 +28,10 @@ class FakeClient(o.SnykClient):
     routes: {(method, url-substring): [response, ...]} where a response is (status, body) or
     (status, body, headers); a str body is returned verbatim, anything else as JSON. Each call pops
     the next response, and the last one repeats.
+
+    Unless a test routes it, the mode check (call 13, GET .../closed-beta/orgs/<org>/integrations)
+    answers as Snyk does for an org without the profiles feature: 404 Endpoint Not Found. Time is fake:
+    `_sleep` advances `now`, which `_clock` returns.
     """
 
     def __init__(self, routes):
@@ -33,9 +39,14 @@ class FakeClient(o.SnykClient):
         self.routes = routes
         self.calls = []
         self.sleeps = []
+        self.now = 1000.0
 
     def _sleep(self, seconds):
         self.sleeps.append(seconds)
+        self.now += seconds
+
+    def _clock(self):
+        return self.now
 
     def _send(self, method, url, headers, body):
         self.calls.append((method, url, headers, json.loads(body) if body else None))
@@ -45,10 +56,18 @@ class FakeClient(o.SnykClient):
                 status, payload = item[0], item[1]
                 resp_headers = item[2] if len(item) > 2 else {}
                 return status, resp_headers, payload if isinstance(payload, str) else json.dumps(payload)
+        if method == "GET" and "/closed-beta/orgs/" in url and url.split("?")[0].endswith("/integrations"):
+            return 404, {}, json.dumps(DEFAULT_MODE_ANSWER)
         raise AssertionError(f"unexpected call {method} {url}")
 
     def methods(self):
         return [(m, u.split("?")[0].split("snyk.io")[1]) for m, u, _, _ in self.calls]
+
+    def after_mode_check(self):
+        """methods() without the mode check that opens every run."""
+        calls = self.methods()
+        assert calls and calls[0] == ("GET", f"/closed-beta/orgs/{ORG}/integrations"), calls[:1]
+        return calls[1:]
 
     def posts_to(self, suffix):
         return [p for m, p in self.methods() if m == "POST" and p.endswith(suffix)]
@@ -62,6 +81,7 @@ def make_args(mode="apply", **over):
         no_sync=False, update_credentials=False, max_images=1000, force=False, connect_retries=3, connect_delay=1,
         dry_run_timeout=30, poll_seconds=0, delete_projects=False, delete_credentials=False, yes=False,
         repo_prefix=None, all_origins=False, api_base="https://api.snyk.io", api_version="2025-09-17",
+        connection=None, exact_name=False, delete_connection=False,
     )
     base.update(over)
     return argparse.Namespace(**base)
@@ -85,6 +105,55 @@ def happy_routes(existing=None, tags=3):
         ("GET", "/dry_run/job-1"): [dry_run_done(tags)],
         ("POST", "/policy?"): [(201, {"data": {"type": "container_registry_import_policy"}})],
     }
+
+
+# -- profiles mode (feature 002) ------------------------------------------------------------------
+ACCOUNT = "123456789012"
+ROLE_B = "arn:aws:iam::111111111111:role/snyk-ecr-read"
+ADDR_A = "123456789012.dkr.ecr.ap-southeast-2.amazonaws.com"
+
+
+def profile_entry(integration_id, name, integration_type="ecr"):
+    return {"id": integration_id, "type": "integration",
+            "attributes": {"integration_type": integration_type, "profile_name": name, "has_broker": False}}
+
+
+def profiles_list(*entries, nxt=None):
+    page = {"data": list(entries), "links": {"next": nxt} if nxt else {}}
+    return (200, page, {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1"})
+
+
+def target_entry(target_id, integration_id, display_name="team-a/app"):
+    return {"id": target_id, "attributes": {"display_name": display_name, "integration_type": "ecr"},
+            "relationships": {"integration": {"data": {"id": integration_id, "type": "integration"}}}}
+
+
+def ecr_project(project_id, name, target_id):
+    return {"id": project_id, "attributes": {"name": name, "origin": "ecr"},
+            "relationships": {"target": {"data": {"id": target_id, "type": "target"}}}}
+
+
+def profile_routes(*entries, tags=3, projects=(), targets=()):
+    """Call 13 answering 200 (profiles mode) with the given connections, plus the baseline's sync routes."""
+    return {
+        ("GET", "/closed-beta/orgs/"): [profiles_list(*entries)],
+        ("POST", "/closed-beta/orgs/"): [(201, {"data": {"id": "new-conn", "type": "integration"}})],
+        ("PATCH", "/closed-beta/orgs/"): [(200, {"data": {"type": "integration"}})],
+        ("DELETE", "/closed-beta/orgs/"): [(204, "")],
+        ("POST", "/dry_run"): [(202, {"data": {"id": "job-1", "type": "dry_run_job", "attributes": {"status": "pending"}}})],
+        ("GET", "/dry_run/job-1"): [dry_run_done(tags)],
+        ("GET", "/policy?"): [(404, {})],
+        ("POST", "/policy?"): [(201, {"data": {"type": "container_registry_import_policy"}})],
+        ("DELETE", "/policy?"): [(204, {})],
+        ("GET", "/projects?"): [(200, {"data": list(projects)})],
+        ("GET", "/targets?"): [(200, {"data": list(targets)})],
+        ("DELETE", "/projects/"): [(204, {})],
+    }
+
+
+def writes(c):
+    """Every call that changes something: dry runs are previews and change nothing."""
+    return [(m, p) for m, p in c.methods() if m != "GET" and not p.endswith("/dry_run")]
 
 
 class Quiet(unittest.TestCase):
@@ -269,8 +338,11 @@ class ValidationTests(Quiet):
         o.validate_inputs(make_args("apply", no_sync=True, import_policy=None, repo=None))  # plain --no-sync
 
     def test_delete_projects_requires_a_prefix(self):
+        # In default mode only (profiles mode selects by provenance); checked before any write.
+        c = FakeClient({})
         with self.assertRaises(o.UsageError):
-            o.validate_inputs(make_args("teardown", delete_projects=True, repo_prefix=None))
+            o.run(make_args("teardown", delete_projects=True, repo_prefix=None), c)
+        self.assertEqual(c.after_mode_check(), [])
 
 
 @contextlib.contextmanager
@@ -373,7 +445,7 @@ class SyncWorkflowTests(Quiet):
     def test_plan_never_writes_when_integration_missing(self):
         c = FakeClient(happy_routes())
         self.assertEqual(o.run(make_args("plan"), c), 0)
-        self.assertEqual(c.methods(), [("GET", f"/v1/org/{ORG}/integrations")])
+        self.assertEqual(c.after_mode_check(), [("GET", f"/v1/org/{ORG}/integrations")])
 
     def test_plan_with_existing_integration_previews_but_never_writes(self):
         c = FakeClient(happy_routes(existing=INTEGRATION))
@@ -385,12 +457,12 @@ class SyncWorkflowTests(Quiet):
     def test_apply_creates_dry_runs_then_applies(self):
         c = FakeClient(happy_routes())
         self.assertEqual(o.run(make_args("apply"), c), 0)
-        kinds = [(m, p.rsplit("/", 1)[-1]) for m, p in c.methods()]
+        kinds = [(m, p.rsplit("/", 1)[-1]) for m, p in c.after_mode_check()]
         self.assertEqual(kinds[0], ("GET", "integrations"))
         self.assertEqual(kinds[1], ("POST", "integrations"))
         self.assertEqual(kinds[2], ("POST", "dry_run"))
         self.assertEqual(kinds[-1], ("POST", "policy"))
-        self.assertEqual(c.calls[1][3], {"type": "ecr", "credentials": {"region": "ap-southeast-2", "roleArn": ROLE}})
+        self.assertEqual(c.calls[2][3], {"type": "ecr", "credentials": {"region": "ap-southeast-2", "roleArn": ROLE}})
 
     def test_apply_is_idempotent_reuses_integration(self):
         c = FakeClient(happy_routes(existing=INTEGRATION))
@@ -552,7 +624,7 @@ class ConnectOnlyTests(Quiet):
     def test_plan_with_no_sync_never_writes(self):
         c = FakeClient(happy_routes())
         self.assertEqual(o.run(make_args("plan", no_sync=True, import_policy=None, repo=None), c), 0)
-        self.assertEqual(c.methods(), [("GET", f"/v1/org/{ORG}/integrations")])
+        self.assertEqual(c.after_mode_check(), [("GET", f"/v1/org/{ORG}/integrations")])
 
     def test_plan_with_existing_integration_only_reads_and_dry_runs(self):
         c = FakeClient(happy_routes(existing=INTEGRATION))
@@ -705,6 +777,571 @@ class StatusTests(Quiet):
         self.assertEqual(o.run(make_args("status", region=None, role_arn=None), c), 0)
         self.assertIn("ECR integration: none", self.out.getvalue())
 
+
+
+# == Feature 002: profiles mode ===================================================================
+def conn(integration_id, name):
+    return o.Connection.from_entry(profile_entry(integration_id, name))
+
+
+ADDR_B = "111111111111.dkr.ecr.ap-southeast-2.amazonaws.com"
+ADDR_A_US = "123456789012.dkr.ecr.us-east-1.amazonaws.com"
+PROD, STAGING = f"prod {ADDR_A}", f"staging {ADDR_B}"
+
+
+def closed_beta_writes(c):
+    return [(m, p) for m, p in c.methods() if m != "GET" and p.startswith("/closed-beta/")]
+
+
+def body_of(c, method, fragment):
+    return next(b for m, u, h, b in c.calls if m == method and fragment in u)
+
+
+class ModeTests(Quiet):
+    """FR-001 to FR-003 and research R1: the org decides the mode, on every run, before anything else."""
+
+    def test_200_means_profiles_mode(self):
+        c = FakeClient(profile_routes())
+        self.assertEqual(o.run(make_args("status", region=None, role_arn=None), c), 0)
+        self.assertTrue(self.out.getvalue().startswith(o.MODE_LINE + "\n"))
+
+    def test_endpoint_not_found_means_default_mode_with_baseline_output(self):
+        c = FakeClient(happy_routes(existing=INTEGRATION))
+        self.assertEqual(o.run(make_args("plan"), c), 0)
+        out = self.out.getvalue()
+        self.assertNotIn("Mode:", out)
+        self.assertFalse([line for line in out.splitlines() if line.startswith("[")])
+        self.assertTrue(out.startswith(f"ECR integration already exists: {INTEGRATION}\n"))
+        self.assertNotIn("Closed-beta calls", self.err.getvalue())
+
+    def test_any_other_answer_stops_the_run_before_any_write(self):
+        for status, body in ((404, {"errors": [{"status": "404", "detail": "Org not found"}]}), (401, {}), (403, {}),
+                             (406, {}), (500, {})):
+            with self.subTest(status=status):
+                c = FakeClient({**happy_routes(), ("GET", "/closed-beta/orgs/"): [(status, body)]})
+                with self.assertRaisesRegex(RuntimeError, f"HTTP {status}.*Nothing was changed"):
+                    o.run(make_args("apply"), c)
+                self.assertEqual({m for m, _ in c.methods()}, {"GET"})
+                self.assertTrue(all(p.startswith("/closed-beta/") for _, p in c.methods()))
+
+    def test_the_mode_check_is_the_first_call_of_every_subcommand(self):
+        for mode in ("plan", "apply", "status", "teardown"):
+            with self.subTest(mode=mode):
+                routes = {**happy_routes(), ("GET", "/projects?"): [(200, project_page([]))]}
+                c = FakeClient(routes)
+                o.run(make_args(mode), c)
+                self.assertEqual(c.methods()[0], ("GET", f"/closed-beta/orgs/{ORG}/integrations"))
+                self.assertIn(f"version={o.CLOSED_BETA_VERSION}", c.calls[0][1])
+
+    def test_profile_options_are_refused_on_a_default_mode_org_before_any_write(self):
+        for over in ({"connection": "prod"}, {"connection": "prod", "exact_name": True},
+                     {"mode": "teardown", "delete_connection": True, "yes": True}):
+            with self.subTest(**over):
+                c = FakeClient(happy_routes(existing=INTEGRATION))
+                args = make_args(**{"mode": "apply", **over})
+                with self.assertRaisesRegex(o.UsageError, "default mode.*Nothing was changed"):
+                    o.run(args, c)
+                self.assertEqual(c.after_mode_check(), [])
+
+
+class ClosedBetaTransportTests(Quiet):
+    """Research R12: paced by Snyk's own headers, counted, and never past a minute's wait."""
+
+    def client(self, *answers):
+        return FakeClient({("GET", "/closed-beta/orgs/"): list(answers)})
+
+    def test_closed_beta_calls_use_the_pinned_version_and_json_api(self):
+        c = self.client(profiles_list())
+        c.list_closed_beta_integrations(ORG)
+        method, url, headers, _ = c.calls[0]
+        self.assertTrue(url.startswith("https://api.snyk.io/closed-beta/orgs/"))
+        self.assertIn("version=2024-10-15", url)
+        self.assertIn("limit=100", url)
+        self.assertEqual(headers["Accept"], "application/vnd.api+json")
+
+    def test_calls_are_at_least_a_second_apart(self):
+        c = self.client((200, {"data": []}))
+        c.list_closed_beta_integrations(ORG)
+        c.list_closed_beta_integrations(ORG)
+        self.assertEqual(c.sleeps, [1.0])
+        self.assertEqual(c.closed_beta_calls, 2)
+
+    def test_waits_for_the_announced_reset_when_nothing_remains(self):
+        c = self.client((200, {"data": []}, {"x-ratelimit-remaining": "0", "X-RateLimit-Reset": "30"}))
+        c.list_closed_beta_integrations(ORG)
+        c.list_closed_beta_integrations(ORG)
+        self.assertEqual(c.sleeps, [30.0])
+
+    def test_a_wait_over_a_minute_stops_before_the_call(self):
+        c = self.client((200, {"data": []}, {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "3000"}))
+        c.list_closed_beta_integrations(ORG)
+        with self.assertRaisesRegex(o.RateLimited, "rate limit.*resets in about 3001 s") as cm:
+            c.list_closed_beta_integrations(ORG)
+        self.assertEqual(len(c.calls), 1)
+        self.assertNotIn("test-token", str(cm.exception))
+
+    def test_429_waits_for_the_reset_when_there_is_no_retry_after(self):
+        c = self.client((429, {}, {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "5"}), (200, {"data": []}))
+        c.list_closed_beta_integrations(ORG)
+        self.assertIn(5.0, c.sleeps)
+        self.assertEqual(c.closed_beta_calls, 2)
+
+    def test_429_with_a_long_reset_stops_at_once(self):
+        c = self.client((429, {}, {"X-RateLimit-Reset": "600"}))
+        with self.assertRaises(o.RateLimited):
+            c.list_closed_beta_integrations(ORG)
+        self.assertEqual(len(c.calls), 1)
+
+    def test_a_profiles_run_reports_its_closed_beta_call_count(self):
+        c = FakeClient(profile_routes())
+        o.run(make_args("status", region=None, role_arn=None), c)
+        self.assertIn("Closed-beta calls: 1", self.err.getvalue())
+
+
+class ClosedBetaPagingTests(Quiet):
+    def pages(self, nxt):
+        return FakeClient({("GET", "/closed-beta/orgs/"): [
+            profiles_list(profile_entry("c1", PROD), nxt=nxt), profiles_list(profile_entry("c2", STAGING))]})
+
+    def test_follows_every_link_form_on_the_api_host(self):
+        for nxt in (f"/orgs/{ORG}/integrations?version=2024-10-15&starting_after=c1",
+                    f"/closed-beta/orgs/{ORG}/integrations?version=2024-10-15&starting_after=c1",
+                    f"https://api.snyk.io/closed-beta/orgs/{ORG}/integrations?version=2024-10-15&starting_after=c1"):
+            with self.subTest(nxt=nxt):
+                c = self.pages(nxt)
+                self.assertEqual([e["id"] for e in c.list_closed_beta_integrations(ORG)], ["c1", "c2"])
+                self.assertEqual(c.calls[1][1], f"https://api.snyk.io/closed-beta/orgs/{ORG}/integrations"
+                                                "?version=2024-10-15&starting_after=c1")
+
+    def test_an_empty_or_missing_links_object_ends_the_list(self):
+        for page in ({"data": [], "links": {}}, {"data": []}):
+            c = FakeClient({("GET", "/closed-beta/orgs/"): [(200, page)]})
+            self.assertEqual(c.list_closed_beta_integrations(ORG), [])
+            self.assertEqual(len(c.calls), 1)
+
+    def test_refuses_a_link_off_the_api_host(self):
+        c = self.pages("https://evil.example.com/closed-beta/orgs/x")
+        with self.assertRaisesRegex(RuntimeError, "off the Snyk API host"):
+            c.list_closed_beta_integrations(ORG)
+
+
+class NameTests(Quiet):
+    """FR-005 and data-model.md, Names."""
+
+    def test_default_names_carry_the_registry_address(self):
+        self.assertEqual(o.registry_address("111111111111", "ap-southeast-2"), "111111111111.dkr.ecr.ap-southeast-2.amazonaws.com")
+        self.assertEqual(o.connection_name(None, "111111111111", "ap-southeast-2"), ADDR_B)
+        self.assertEqual(o.connection_name("prod", "111111111111", "ap-southeast-2"), f"prod {ADDR_B}")
+        self.assertEqual(o.account_of(ROLE), ACCOUNT)
+
+    def test_names_parse_back_to_label_account_and_region(self):
+        self.assertEqual(o.parse_connection_name(ADDR_B), (None, "111111111111", "ap-southeast-2"))
+        self.assertEqual(o.parse_connection_name(f"prod {ADDR_B}"), ("prod", "111111111111", "ap-southeast-2"))
+        for other in ("Default profile", "Payments prod", "prod", "my label " + ADDR_B, None, ""):
+            self.assertIsNone(o.parse_connection_name(other), other)
+        self.assertFalse(conn("x", None).carries_ecr)
+        self.assertEqual(conn("x", None).name, "Default profile")
+
+    def test_labels_and_names_follow_snyks_rules(self):
+        for bad in ("my prod", "-prod", "team/a", "pröd", ""):
+            with self.assertRaises(o.UsageError, msg=bad):
+                o.validate_label(bad)
+        o.validate_label("prod-1.eu_west")
+        o.validate_exact_name("Payments prod")
+        with self.assertRaises(o.UsageError):
+            o.validate_exact_name("a" * 256)
+        with self.assertRaises(o.UsageError):
+            o.validate_exact_name(" leading space")
+
+    def test_china_and_govcloud_are_refused_in_profiles_mode_only(self):
+        for role, region in (("arn:aws-cn:iam::123456789012:role/r", "cn-north-1"),
+                             ("arn:aws-us-gov:iam::123456789012:role/r", "us-gov-west-1"), (ROLE, "cn-north-1")):
+            with self.subTest(role=role, region=region):
+                c = FakeClient(profile_routes())
+                with self.assertRaisesRegex(o.UsageError, "standard partition"):
+                    o.run(make_args("apply", role_arn=role, region=region), c)
+                self.assertEqual(writes(c), [])
+                o.validate_inputs(make_args("apply", role_arn=role, region=region))  # default mode accepts them
+
+    def test_exact_name_needs_a_connection_and_plan_or_apply(self):
+        for over in ({"exact_name": True}, {"exact_name": True, "connection": "x", "mode": "status"},
+                     {"exact_name": True, "connection": "Default profile"}):
+            with self.assertRaises(o.UsageError, msg=over):
+                o.validate_inputs(make_args(**{"mode": "apply", **over}))
+
+
+class ProfileLookupTests(Quiet):
+    """Every row of data-model.md's lookup table (research R3)."""
+
+    def resolve(self, connections, connection=None, exact_name=False, region="ap-southeast-2", update=False):
+        args = make_args("apply", connection=connection, exact_name=exact_name, region=region, update_credentials=update)
+        return o.resolve_connection(connections, args, ACCOUNT, region)
+
+    def test_a_full_name_wins_over_a_label(self):
+        found = self.resolve([conn("c1", PROD), conn("c2", "prod")], "prod")
+        self.assertEqual(found.connection.id, "c2")
+        self.assertTrue(found.warnings, "a name without a registry is used with a warning")
+
+    def test_a_label_finds_its_connection(self):
+        self.assertEqual(self.resolve([conn("c1", PROD)], "prod").connection.id, "c1")
+
+    def test_one_label_on_two_connections_is_refused(self):
+        with self.assertRaisesRegex(o.Refusal, "2 connections are labeled 'prod'") as cm:
+            self.resolve([conn("c1", PROD), conn("c2", f"prod {ADDR_A_US}")], "prod")
+        self.assertEqual(len(cm.exception.connections), 2)
+
+    def test_not_found_creates_label_and_address_or_the_value_or_the_exact_name(self):
+        self.assertEqual(self.resolve([], "prod").name, PROD)
+        self.assertEqual(self.resolve([], f"x {ADDR_A}").name, f"x {ADDR_A}")
+        exact = self.resolve([], "Payments prod", exact_name=True)
+        self.assertEqual((exact.connection, exact.name), (None, "Payments prod"))
+        self.assertIn("cannot check its ECR", exact.warnings[-1])
+
+    def test_a_value_naming_another_registry_is_refused(self):
+        with self.assertRaisesRegex(o.Refusal, f"names registry {ADDR_B}"):
+            self.resolve([], f"prod {ADDR_B}")
+
+    def test_without_a_name_the_connection_carrying_the_registry_is_used(self):
+        self.assertEqual(self.resolve([conn("c1", PROD), conn("c2", STAGING)]).connection.id, "c1")
+
+    def test_without_a_name_two_connections_carrying_the_registry_are_refused(self):
+        with self.assertRaisesRegex(o.Refusal, f"2 connections read registry {ADDR_A}"):
+            self.resolve([conn("c1", PROD), conn("c2", f"dr {ADDR_A}")])
+
+    def test_without_a_name_and_no_match_the_address_is_the_new_name(self):
+        self.assertEqual(self.resolve([conn("c2", STAGING)]).name, ADDR_A)
+
+    def test_without_a_name_a_connection_with_no_registry_in_its_name_blocks_a_create(self):
+        with self.assertRaisesRegex(o.Refusal, "'Default profile'.*may read it"):
+            self.resolve([conn("c9", "Default profile"), conn("c2", STAGING)])
+
+    def test_a_second_connection_to_one_registry_is_allowed_with_a_warning(self):
+        found = self.resolve([conn("c1", PROD)], "dr")
+        self.assertEqual(found.name, f"dr {ADDR_A}")
+        self.assertIn("imported twice", found.warnings[0])
+
+    def test_a_name_carrying_another_registry_needs_update_credentials(self):
+        with self.assertRaisesRegex(o.Refusal, f"points at registry {ADDR_A}, not {ADDR_A_US}"):
+            self.resolve([conn("c1", PROD)], "prod", region="us-east-1")
+        self.assertEqual(self.resolve([conn("c1", PROD)], "prod", region="us-east-1", update=True).connection.id, "c1")
+
+
+class ProfileApplyTests(Quiet):
+    """US1: several ECRs in one org, each onboarded on its own."""
+
+    def test_ac1_creates_the_named_connection_then_proves_previews_and_applies_on_it(self):
+        c = FakeClient(profile_routes())
+        self.assertEqual(o.run(make_args("apply", connection="prod"), c), 0)
+        self.assertEqual(body_of(c, "POST", "/closed-beta/orgs/"), {"data": {"type": "integration", "attributes": {
+            "integration_type": "ecr", "profile_name": PROD,
+            "credentials": {"region": "ap-southeast-2", "role_arn": ROLE}}}})
+        self.assertEqual(len(closed_beta_writes(c)), 1, "one closed-beta write per run (R12)")
+        sync = [p for m, p in c.methods() if "/container_import/" in p]
+        self.assertTrue(sync and all("/container_import/new-conn/" in p for p in sync))
+        out = self.out.getvalue()
+        self.assertIn(f"[{PROD}] ECR connection created: new-conn", out)
+        self.assertIn(f"[{PROD}] Sync policy applied for connection {PROD};", out)
+
+    def test_ac2_a_second_connection_never_touches_the_first(self):
+        c = FakeClient(profile_routes(profile_entry("c1", PROD)))
+        self.assertEqual(o.run(make_args("apply", connection="staging", role_arn=ROLE_B), c), 0)
+        self.assertEqual(body_of(c, "POST", "/closed-beta/orgs/")["data"]["attributes"]["profile_name"], STAGING)
+        self.assertFalse([p for _, p in c.methods() if "c1" in p])
+
+    def test_ac3_a_rerun_reuses_the_connection_and_replaces_only_its_policy(self):
+        c = FakeClient(profile_routes(profile_entry("c1", PROD)))
+        self.assertEqual(o.run(make_args("apply", connection="prod"), c), 0)
+        self.assertEqual(closed_beta_writes(c), [])
+        self.assertEqual(c.posts_to("/policy"), [f"/rest/orgs/{ORG}/container_import/c1/policy"])
+
+    def test_ac4_and_sc007_an_unnamed_run_names_it_after_the_registry_and_finds_it_again(self):
+        c = FakeClient(profile_routes())
+        o.run(make_args("apply"), c)
+        self.assertEqual(body_of(c, "POST", "/closed-beta/orgs/")["data"]["attributes"]["profile_name"], ADDR_A)
+        again = FakeClient(profile_routes(profile_entry("new-conn", ADDR_A)))
+        self.assertEqual(o.run(make_args("apply"), again), 0)
+        self.assertEqual(closed_beta_writes(again), [])
+
+    def test_ac6_a_connection_made_before_the_feature_blocks_an_unnamed_create(self):
+        c = FakeClient(profile_routes(profile_entry("c0", None)))
+        with self.assertRaises(o.Refusal):
+            o.run(make_args("apply"), c)
+        self.assertEqual(writes(c), [])
+
+    def test_ac7_a_name_carrying_another_registry_is_refused_without_a_write(self):
+        c = FakeClient(profile_routes(profile_entry("c1", PROD)))
+        with self.assertRaisesRegex(o.Refusal, f"points at registry {ADDR_A}"):
+            o.run(make_args("apply", connection="prod", region="us-east-1"), c)
+        self.assertEqual(writes(c), [])
+
+    def test_ac8_a_name_without_a_registry_is_used_with_a_warning(self):
+        c = FakeClient(profile_routes(profile_entry("c3", "Payments")))
+        self.assertEqual(o.run(make_args("apply", connection="Payments"), c), 0)
+        self.assertIn("[Payments] Warning: this connection's name does not carry its registry", self.out.getvalue())
+        self.assertEqual(c.posts_to("/policy"), [f"/rest/orgs/{ORG}/container_import/c3/policy"])
+
+    def test_update_credentials_repoints_and_renames_so_the_name_stays_true(self):
+        c = FakeClient(profile_routes(profile_entry("c1", PROD)))
+        self.assertEqual(o.run(make_args("apply", connection="prod", region="us-east-1", update_credentials=True), c), 0)
+        self.assertEqual(body_of(c, "PATCH", "/closed-beta/orgs/"), {"data": {"id": "c1", "type": "integration", "attributes": {
+            "credentials": {"region": "us-east-1", "role_arn": ROLE}, "profile_name": f"prod {ADDR_A_US}"}}})
+        self.assertIn(f"[prod {ADDR_A_US}] Sync policy applied", self.out.getvalue())
+
+    def test_update_credentials_for_the_same_registry_sends_the_credentials_only(self):
+        c = FakeClient(profile_routes(profile_entry("c1", PROD)))
+        o.run(make_args("apply", connection="prod", update_credentials=True), c)
+        self.assertNotIn("profile_name", body_of(c, "PATCH", "/closed-beta/orgs/")["data"]["attributes"])
+
+    def test_plan_with_update_credentials_says_what_it_would_change_and_writes_nothing(self):
+        c = FakeClient(profile_routes(profile_entry("c1", PROD)))
+        self.assertEqual(o.run(make_args("plan", connection="prod", region="us-east-1", update_credentials=True), c), 0)
+        self.assertEqual(writes(c), [])
+        self.assertIn(f"would update credentials (--update-credentials) and rename it to 'prod {ADDR_A_US}'", self.out.getvalue())
+
+    def test_plan_never_writes(self):
+        c = FakeClient(profile_routes())
+        self.assertEqual(o.run(make_args("plan", connection="prod"), c), 0)
+        self.assertEqual(writes(c), [])
+        self.assertIn(f"[{PROD}] ECR connection missing: apply would create it", self.out.getvalue())
+
+    def test_a_name_conflict_is_a_refusal_and_never_retried(self):
+        for method in ("POST", "PATCH"):
+            with self.subTest(method=method):
+                routes = profile_routes(profile_entry("c1", PROD))
+                routes[(method, "/closed-beta/orgs/")] = [(409, {"errors": [{"detail": "conflict"}]})]
+                args = (make_args("apply", connection="staging", role_arn=ROLE_B) if method == "POST" else
+                        make_args("apply", connection="prod", region="us-east-1", update_credentials=True))
+                c = FakeClient(routes)
+                with self.assertRaisesRegex(o.Refusal, "already has a connection named"):
+                    o.run(args, c)
+                self.assertEqual(len(closed_beta_writes(c)), 1)
+
+    def test_a_second_connection_to_one_registry_warns_of_double_imports(self):
+        c = FakeClient(profile_routes(profile_entry("c1", PROD)))
+        self.assertEqual(o.run(make_args("apply", connection="dr"), c), 0)
+        self.assertIn("its images will be imported twice", self.out.getvalue())
+
+    def test_sc001_three_connections_across_two_accounts_and_two_regions(self):
+        listed = []
+        for label, role, region in (("prod", ROLE, "ap-southeast-2"), ("staging", ROLE_B, "ap-southeast-2"),
+                                    ("dr", ROLE, "us-east-1")):
+            c = FakeClient(profile_routes(*listed))
+            self.assertEqual(o.run(make_args("apply", connection=label, role_arn=role, region=region), c), 0)
+            name = body_of(c, "POST", "/closed-beta/orgs/")["data"]["attributes"]["profile_name"]
+            listed.append(profile_entry(f"id-{label}", name))
+        made = o.connections_from(listed)
+        self.assertEqual(len(made), 3)
+        self.assertEqual({x.account for x in made}, {ACCOUNT, "111111111111"})
+        self.assertEqual({x.region for x in made if x.account == ACCOUNT}, {"ap-southeast-2", "us-east-1"})
+
+
+class ProfileFailureHintTests(Quiet):
+    def test_a_failing_connection_test_names_the_connection_and_the_profile_orgs_input(self):
+        routes = profile_routes()
+        routes[("GET", "/dry_run/job-1")] = [dry_run_failed("cannot assume role")]
+        with self.assertRaises(o.DryRunFailed) as cm:
+            o.run(make_args("apply", connection="prod", no_sync=True, import_policy=None, repo=None), FakeClient(routes))
+        message = str(cm.exception)
+        self.assertIn(f"connection {PROD!r} of org {ORG}", message)
+        self.assertIn("snyk_profile_orgs", message)
+        self.assertIn(f"--connection {PROD!r} --update-credentials", message)
+
+
+class ProvenanceTests(Quiet):
+    """US2: each project under the connection Snyk says imported it, never by its name."""
+
+    def routes(self, extra=None):
+        host_b = ADDR_B
+        r = profile_routes(profile_entry("c1", PROD), profile_entry("c2", STAGING),
+                           projects=[ecr_project("p1", "team-a/app:v1.4.0", "t1"), ecr_project("p2", "team-a/app:v1.4.0", "t2"),
+                                     ecr_project("p3", f"{host_b}/team-b/svc:v1", "t1"), ecr_project("p4", "old/app:v1", "t9")],
+                           targets=[target_entry("t1", "c1"), target_entry("t2", "c2"), target_entry("t9", "gone")])
+        r.update(extra or {})
+        return r
+
+    def test_the_same_image_in_two_registries_appears_under_each_connection(self):
+        c = FakeClient(self.routes())
+        self.assertEqual(o.run(make_args("status", region=None, role_arn=None), c), 0)
+        out = self.out.getvalue()
+        self.assertIn(f"[{PROD}]   - team-a/app:v1.4.0", out)
+        self.assertIn(f"[{STAGING}]   - team-a/app:v1.4.0", out)
+        self.assertEqual({m for m, _ in c.methods()}, {"GET"})
+
+    def test_attribution_comes_from_the_target_never_from_the_name(self):
+        o.run(make_args("status", region=None, role_arn=None), FakeClient(self.routes()))
+        self.assertIn(f"[{PROD}]   - {ADDR_B}/team-b/svc:v1", self.out.getvalue())
+        self.assertNotIn(f"[{STAGING}]   - {ADDR_B}/team-b/svc:v1", self.out.getvalue())
+
+    def test_a_target_naming_no_listed_connection_is_reported_as_unknown(self):
+        o.run(make_args("status", region=None, role_arn=None), FakeClient(self.routes()))
+        self.assertIn("Connection unknown: 1 project(s) whose target names no listed connection", self.out.getvalue())
+        self.assertIn("  ? old/app:v1", self.out.getvalue())
+
+    def test_targets_follow_pagination(self):
+        nxt = f"/orgs/{ORG}/targets?version=2025-09-17&starting_after=t1"
+        c = FakeClient(self.routes(extra={("GET", "/targets?"): [(200, {"data": [target_entry("t1", "c1")], "links": {"next": nxt}}),
+                                                              (200, {"data": [target_entry("t2", "c2")]})]}))
+        self.assertEqual(c.list_targets(ORG), {"t1": "c1", "t2": "c2"})
+        self.assertTrue(any(u.startswith(f"https://api.snyk.io/rest/orgs/{ORG}/targets?") and "starting_after" in u
+                            for _, u, _, _ in c.calls))
+
+    def test_every_line_of_the_read_proof_and_preview_names_the_connection(self):
+        o.run(make_args("plan", connection="prod"), FakeClient(profile_routes(profile_entry("c1", PROD))))
+        lines = [l for l in self.out.getvalue().splitlines()
+                 if "Snyk can read the registry" in l or "team-a/app" in l or l.startswith("Dry run")]
+        self.assertTrue(lines)
+        self.assertTrue(all(l.startswith(f"[{PROD}] ") for l in lines), lines)
+
+    def test_all_origins_names_each_ecr_projects_connection(self):
+        o.run(make_args("status", region=None, role_arn=None, all_origins=True), FakeClient(self.routes()))
+        self.assertIn(f"  * team-a/app:v1.4.0  [origin: ecr, connection: {STAGING}]", self.out.getvalue())
+
+
+class ProfileTeardownTests(Quiet):
+    """US3: pause or disconnect one connection; the others keep everything."""
+
+    def routes(self, policy=True, extra=None):
+        r = profile_routes(profile_entry("c1", PROD), profile_entry("c2", STAGING),
+                           projects=[ecr_project("p1", "team-a/app:v1", "t1"), ecr_project("p2", "team-a/app:v1", "t2"),
+                                     ecr_project("p3", "team-b/svc:v1", "t2")],
+                           targets=[target_entry("t1", "c1"), target_entry("t2", "c2")])
+        if policy:
+            r[("GET", "/policy?")] = [(200, {"data": {"attributes": {"policy": {"name": "x"}}}})]
+        r.update(extra or {})
+        return r
+
+    def deletes(self, c):
+        return [p for m, p in c.methods() if m == "DELETE"]
+
+    def test_no_name_or_an_unknown_name_is_refused(self):
+        for name in (None, "qa"):
+            with self.subTest(name=name):
+                c = FakeClient(self.routes())
+                with self.assertRaises(o.Refusal) as cm:
+                    o.run(make_args("teardown", connection=name, yes=True), c)
+                self.assertEqual(len(cm.exception.connections), 2)
+                self.assertEqual(writes(c), [])
+
+    def test_no_options_pauses_only_that_connection(self):
+        c = FakeClient(self.routes())
+        self.assertEqual(o.run(make_args("teardown", connection="staging", yes=True), c), 0)
+        self.assertEqual(self.deletes(c), [f"/rest/orgs/{ORG}/container_import/c2/policy"])
+
+    def test_the_disconnect_dry_run_counts_the_projects_and_deletes_nothing(self):
+        c = FakeClient(self.routes())
+        self.assertEqual(o.run(make_args("teardown", connection="staging", delete_connection=True), c), 0)
+        self.assertIn(f"[{STAGING}] Connection: will be deleted, and with it 2 project(s) imported through it", self.out.getvalue())
+        self.assertEqual(writes(c), [])
+
+    def test_a_confirmed_disconnect_deletes_policy_projects_then_the_connection(self):
+        c = FakeClient(self.routes())
+        args = make_args("teardown", connection="staging", delete_projects=True, delete_connection=True, yes=True)
+        self.assertEqual(o.run(args, c), 0)
+        self.assertEqual(self.deletes(c), [f"/rest/orgs/{ORG}/container_import/c2/policy", f"/rest/orgs/{ORG}/projects/p2",
+                                           f"/rest/orgs/{ORG}/projects/p3", f"/closed-beta/orgs/{ORG}/integrations/c2"])
+        self.assertFalse([p for _, p in c.methods() if "c1" in p])
+        self.assertIn(f"[{STAGING}] Connection deleted; Snyk is deleting its projects.", self.out.getvalue())
+
+    def test_projects_are_selected_by_provenance_and_narrowed_by_an_optional_prefix(self):
+        c = FakeClient(self.routes())
+        o.run(make_args("teardown", connection="staging", delete_projects=True, repo_prefix="team-a/", yes=True), c)
+        self.assertEqual([p for p in self.deletes(c) if "/projects/" in p], [f"/rest/orgs/{ORG}/projects/p2"])
+
+    def test_unknown_provenance_among_the_candidates_refuses_with_nothing_deleted(self):
+        c = FakeClient(self.routes(extra={("GET", "/targets?"): [(200, {"data": [target_entry("t1", "c1")]})]}))
+        with self.assertRaisesRegex(o.Refusal, "no recorded connection"):
+            o.run(make_args("teardown", connection="staging", delete_projects=True, yes=True), c)
+        self.assertEqual(writes(c), [])
+
+    def test_a_connection_made_before_the_feature_cannot_be_disconnected(self):
+        c = FakeClient(profile_routes(profile_entry("c0", None)))
+        with self.assertRaisesRegex(o.Refusal, "Profile Management.*rename it there to its registry address"):
+            o.run(make_args("teardown", connection="Default profile", delete_connection=True, yes=True), c)
+        self.assertEqual(writes(c), [])
+
+    def test_delete_credentials_is_refused_in_profiles_mode(self):
+        c = FakeClient(self.routes())
+        with self.assertRaisesRegex(o.Refusal, "--delete-connection"):
+            o.run(make_args("teardown", connection="staging", delete_credentials=True, yes=True), c)
+        self.assertEqual(writes(c), [])
+
+    def test_a_connection_already_gone_is_reported(self):
+        c = FakeClient(self.routes(extra={("DELETE", "/closed-beta/orgs/"): [(404, {})]}))
+        self.assertEqual(o.run(make_args("teardown", connection="staging", delete_connection=True, yes=True), c), 0)
+        self.assertIn("Connection: already gone.", self.out.getvalue())
+
+    def test_a_spent_allowance_stops_before_the_policy_is_deleted(self):
+        spent = (200, {"data": [profile_entry("c2", STAGING)]}, {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "900"})
+        c = FakeClient(self.routes(extra={("GET", "/closed-beta/orgs/"): [spent]}))
+        with self.assertRaises(o.RateLimited):
+            o.run(make_args("teardown", connection="staging", delete_connection=True, yes=True), c)
+        self.assertEqual(writes(c), [])
+
+
+class ProfileDeleteScopeTests(Quiet):
+    """Constitution Principle I in profiles mode: only the named connection's policy, the connection
+    itself, and projects whose target names it may ever be deleted."""
+
+    def test_every_teardown_combination_stays_inside_the_named_connection(self):
+        allowed = {f"/rest/orgs/{ORG}/container_import/c2/policy", f"/closed-beta/orgs/{ORG}/integrations/c2",
+                   f"/rest/orgs/{ORG}/projects/p2", f"/rest/orgs/{ORG}/projects/p3"}
+        for delete_projects in (False, True):
+            for delete_connection in (False, True):
+                for prefix in (None, "team-a/", "team-"):
+                    with self.subTest(projects=delete_projects, connection=delete_connection, prefix=prefix):
+                        c = FakeClient(ProfileTeardownTests.routes(None))
+                        o.run(make_args("teardown", connection="staging", delete_projects=delete_projects,
+                                        delete_connection=delete_connection, repo_prefix=prefix, yes=True), c)
+                        gone = {p for m, p in c.methods() if m == "DELETE"}
+                        self.assertTrue(gone <= allowed, gone - allowed)
+                        self.assertFalse([p for _, p in c.methods() if p.startswith("/v1/")])
+
+
+class RefusalOutputTests(Quiet):
+    """contracts/cli.md: a refusal prints 'Refused: ...' and the org's connections to stderr, exit 1."""
+
+    def test_main_prints_the_refusal_and_the_connections(self):
+        fake = FakeClient(profile_routes(profile_entry("c0", None), profile_entry("c2", STAGING)))
+        argv = ["apply", "--org-id", ORG, "--region", "ap-southeast-2", "--role-arn", ROLE, "--import-policy", "ImportAll"]
+        with unittest.mock.patch.object(o, "SnykClient", lambda *a, **k: fake), \
+                unittest.mock.patch.dict(os.environ, {"SNYK_TOKEN": "test-token"}):
+            self.assertEqual(o.main(argv), 1)
+        err = self.err.getvalue()
+        self.assertIn("Refused: no connection's name carries registry", err)
+        self.assertIn("Connections in this org:\n  Default profile (registry not in its name)\n"
+                      f"  {STAGING} (account 111111111111, region ap-southeast-2)\n", err)
+        self.assertEqual(writes(fake), [])
+
+
+class ProfileStatusTests(Quiet):
+    """US5: every connection in one read-only report."""
+
+    def routes(self):
+        r = profile_routes(profile_entry("c1", PROD), profile_entry("c2", STAGING), profile_entry("c3", "Payments"))
+        r[("GET", "/policy?")] = [(200, {"data": {"attributes": {"policy": {
+            "name": "p", "import_policy": {"type": "Regex"}, "schedule_frequency_hours": 6}}}})]
+        return r
+
+    def test_lists_every_connection_with_where_it_reads_and_its_policy_and_only_reads(self):
+        c = FakeClient(self.routes())
+        self.assertEqual(o.run(make_args("status", region=None, role_arn=None), c), 0)
+        out = self.out.getvalue()
+        self.assertIn(f"[{PROD}] ECR connection: c1 (account {ACCOUNT}, region ap-southeast-2)", out)
+        self.assertIn(f"[{STAGING}] ECR connection: c2 (account 111111111111, region ap-southeast-2)", out)
+        self.assertIn("[Payments] ECR connection: c3 (account and region not in its name; Snyk's UI shows them under "
+                      "Organization settings → Integrations → Amazon ECR → Profile Management)", out)
+        self.assertEqual(out.count("Sync policy    : p (import_policy Regex; schedule_frequency_hours 6;"), 3)
+        self.assertEqual({m for m, _ in c.methods()}, {"GET"})
+
+    def test_a_named_connection_is_reported_alone(self):
+        o.run(make_args("status", region=None, role_arn=None, connection="staging"), FakeClient(self.routes()))
+        out = self.out.getvalue()
+        self.assertIn(f"[{STAGING}] ECR connection: c2", out)
+        self.assertNotIn(f"[{PROD}]", out)
+
+    def test_an_unknown_name_is_refused(self):
+        with self.assertRaises(o.Refusal):
+            o.run(make_args("status", region=None, role_arn=None, connection="qa"), FakeClient(self.routes()))
 
 if __name__ == "__main__":
     unittest.main()

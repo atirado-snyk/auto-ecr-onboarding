@@ -73,10 +73,12 @@ Every line about a repository, an image, or a project starts with `[<connection'
 | `[…] Sync policy applied for connection …; Snyk runs it now and then every … hours.` | `apply` |
 | `[…] Sync policy    : <name> (…)` or `[…] Sync policy    : none` | `status` |
 | `[…]   - <project name>` | `status`, one per project of that connection |
-| `Connection unknown: N project(s) whose target names no listed connection` | `status`, when it applies |
+| `Connection unknown: N project(s) whose target names no listed connection (…)`, then `  ? <project name>` lines | `status`, when it applies |
 | `[…] Connection: will be deleted, and with it N project(s) imported through it` | `teardown --delete-connection` dry run |
 | `[…] Connection deleted; Snyk is deleting its projects.` | `teardown --delete-connection --yes` |
 | `Refused: …` and `Connections in this org:` followed by `  <name> (account …, region …)` lines, or `  <name> (registry not in its name)` | every refusal (stderr) |
+| `Closed-beta calls: N` | every run in profiles mode, last line (stderr); the e2e step adds these up (research R12) |
+| `error: Snyk's closed-beta rate limit for this token is spent (…); it resets in about N s. Nothing more was sent; re-run after that.` | any run, in either mode, when the next closed-beta call would wait more than 60 seconds (stderr), always before the run's one closed-beta write |
 
 In default mode no `Mode:` line is printed and no line gets a prefix, so the baseline's output
 contract and the harness's matches stay as they are.
