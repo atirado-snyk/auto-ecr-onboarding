@@ -147,7 +147,9 @@ org-level service account (access token, Org Admin). The scenarios above, two re
 teardown passed; in scenario 2 the plan was exactly the in-place trust update and an org the role did not yet
 trust failed with the expected hint, but applying the update was refused by the test identity's IAM
 permissions (`iam:UpdateAssumeRolePolicy`, see [Permissions](docs/USAGE.md#permissions)), so that apply and the
-one-region teardown are not yet verified live. OAuth 2.0 service accounts (bearer tokens) are not supported yet.
+one-region teardown are not yet verified live. On 2026-11-24, scenario 1 and the whole-account teardown
+passed again from scratch against the committed code. OAuth 2.0 service accounts (bearer tokens) are not
+supported yet.
 
 ## License
 MIT. See [LICENSE](LICENSE).

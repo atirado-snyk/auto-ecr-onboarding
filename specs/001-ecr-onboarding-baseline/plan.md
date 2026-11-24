@@ -227,7 +227,8 @@ directories because they run separately: Terraform once per account, the script 
 
 Offline evidence names the unit tests (in `tests/test_onboard_ecr.py` unless stated) or `terraform
 test` runs that assert the requirement. Live evidence refers to the e2e steps in
-[docs/TESTING.md](../../docs/TESTING.md), US tenant, last run 2026-10-19.
+[docs/TESTING.md](../../docs/TESTING.md), US tenant: every scenario on 2026-10-19 (from the working
+tree later committed as `f035a43`), and `e2e.sh single` on 2026-11-24 at `f035a43`.
 
 | FR | Implemented in | Offline evidence | Live evidence |
 |----|----------------|------------------|---------------|
