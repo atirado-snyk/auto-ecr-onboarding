@@ -131,7 +131,10 @@ What it raises:
 - **Two modes**, decided by Snyk's flag on the org: default (baseline unchanged) and profiles.
 - **Provenance instead of prefix matching**: overlapping repositories across environments are expected,
   so a project's connection must come from Snyk's record, and teardown selects projects by connection.
-- **Disconnect means delete**: removing a connection deletes it; its scans stay as history.
+- **Disconnect means delete, as the product does**: removing a connection deletes it, and Snyk then
+  deletes its projects. First answered as "delete and keep the scans as history"; revised by the owner
+  ("we do what the product does") after the UI's code showed that a delete removes the projects.
+  Pausing keeps a connection's results.
 - **Names default to the ECR registry URI** (owner, revising the no-default draft). The URI states
   exactly where an image came from, and a re-run for the same ECR reaches the same connection. The
   engineer may give another name, such as the environment. `teardown` still needs the name.

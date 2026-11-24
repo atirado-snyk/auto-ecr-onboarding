@@ -88,8 +88,9 @@ flowchart LR
     s1 -- "imported through staging" --> sp
 ```
 
-Each connection follows the baseline's lifecycle on its own. What disconnecting does to a
-connection's projects is open (FR-014): Snyk's UI says deleting a profile deletes its projects.
+Each connection follows the baseline's lifecycle on its own, with one difference: disconnecting
+deletes the connection, and Snyk then deletes its projects, as its own UI does. Pausing is the way to
+keep a connection's results.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -150,8 +151,8 @@ shows two projects for that image, one under each connection.
 ### User Story 3 - Pause or disconnect one connection (Priority: P2)
 
 The engineer pauses or disconnects one connection of a shared org. The other connections keep
-working, and nothing they imported is touched. What happens to the disconnected connection's own
-projects follows FR-014.
+working, and nothing they imported is touched. Disconnecting deletes the connection and, as in Snyk's
+own UI, its projects; pausing keeps both.
 
 **Why this priority**: in a shared org a mistaken teardown reaches more projects, so it must be scoped
 by connection.
@@ -165,12 +166,14 @@ keeps its policy, its projects, and a passing read proof throughout.
    nothing changes, and the tool lists the org's connections.
 2. **Given** `prod` and `staging`, **When** teardown for `staging` is confirmed with no options,
    **Then** only `staging`'s policy is removed (a pause).
-3. **Given** a request to disconnect `staging`, **When** teardown is confirmed, **Then** `staging` is
-   disconnected as FR-014 states, and `prod` is unchanged.
-4. **Given** a request to also remove `staging`'s projects, **When** teardown is confirmed, **Then**
-   only projects imported through `staging` are removed, optionally narrowed by a repository prefix,
-   even where `prod` has the same repositories.
-5. **Given** Snyk does not record which connection imported the projects, **When** project removal is
+3. **Given** a request to disconnect `staging`, **When** teardown runs unconfirmed, **Then** nothing
+   changes, and the tool says that `staging` and the projects imported through it will be deleted.
+4. **Given** the same request, **When** teardown is confirmed, **Then** the `staging` connection is
+   deleted, Snyk removes the projects imported through it, and `prod` is unchanged.
+5. **Given** a request to remove some of `staging`'s projects while keeping the connection, **When**
+   teardown is confirmed, **Then** only projects imported through `staging` are removed, optionally
+   narrowed by a repository prefix, even where `prod` has the same repositories.
+6. **Given** Snyk does not record which connection imported the projects, **When** that removal is
    requested, **Then** the tool refuses it and changes nothing.
 
 ---
@@ -218,6 +221,8 @@ The engineer sees, in one read-only report, every connection of the org and its 
 
 - **A name that does not exist**, given to `status` or `teardown`: nothing changes, and the tool lists
   the org's connections.
+- **Right after a disconnect**, `status` may still list the connection's projects while Snyk removes
+  them; the tool says their removal is in progress rather than reporting them as kept.
 - **A name already used in the org**, given to `apply` for a different ECR: `apply` treats it as the
   existing connection and changes its role or region only when asked, as for any existing connection.
 - **Exactly one connection in profiles mode**: it still has a name, and changes still require it.
@@ -275,10 +280,11 @@ The engineer sees, in one read-only report, every connection of the org and its 
 - **FR-013**: Removing projects MUST select the projects imported through the named connection; a
   repository prefix MAY narrow that selection. Where Snyk does not record which connection imported
   them, removal MUST be refused with nothing changed.
-- **FR-014**: Disconnecting a named connection MUST [NEEDS CLARIFICATION: Snyk's UI says deleting a
-  profile also deletes all of its projects, so "delete the connection" and "keep its scans as history"
-  cannot both hold. Delete the connection and its projects, with a pause as the way to keep history;
-  or remove only its credentials, if Snyk allows that, and keep the projects?]
+- **FR-014**: Disconnecting a named connection MUST delete it, as Snyk's own UI does, and Snyk then
+  deletes every project imported through it. Disconnecting MUST be requested explicitly, apart from a
+  pause, and confirmed. The dry run MUST say that the connection's projects will be deleted, and how
+  many where Snyk's record allows counting them. To keep a connection's results, the engineer pauses
+  it instead.
 - **FR-015**: A confirmed teardown MUST remove the connection's policy first, then the requested
   projects, then, when asked, the connection.
 
@@ -334,8 +340,8 @@ Changes to the baseline's entities:
 - **Each connection presents the org ID as the external ID**, as a single connection does. To be
   confirmed in planning.
 - **Deleting a connection deletes its projects**, according to Snyk's UI ("permanently delete all
-  projects associated with this profile"). This replaces the earlier assumption that they remain;
-  to be verified live through the API.
+  projects associated with this profile"), and asynchronously ("scheduled for removal"). The tool
+  follows the product (owner, 2026-11-24). To be verified live through the API.
 - **Out of scope**: consolidating existing one-org-per-registry setups into a shared org, and reducing
   duplicate projects when one image exists in several ECRs.
 - **Names** must fit Snyk's limits for profile names. The registry URI is at most about 60 characters
