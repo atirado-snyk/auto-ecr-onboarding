@@ -635,7 +635,11 @@ expect_connected() { # log name created|reused
   fi
   grep -q '^Snyk can read the registry:' <<<"${out}" || fail "[$2] the connection test did not pass"
   lists_repo "${out}" || fail "[$2] the connection test did not list ${REPO_NAME}"
-  grep -Eq "^  \+ ([^ ]*/)?${REPO_NAME}: v1\.0\.0\$" <<<"${out}" || fail "[$2] the sync preview should select exactly v1.0.0"
+  if [[ "$3" == "created" ]]; then
+    grep -Eq "^  \+ ([^ ]*/)?${REPO_NAME}: v1\.0\.0\$" <<<"${out}" || fail "[$2] the sync preview should select exactly v1.0.0"
+  else # on a re-run v1.0.0 is already imported, so the preview may select nothing
+    grep -q '^Dry run: Snyk processed' <<<"${out}" || fail "[$2] the sync preview did not run"
+  fi
   grep -qF "Sync policy applied for connection $2;" <<<"${out}" || fail "[$2] the sync policy was not applied"
 }
 profiles_tf_vars() { tf_vars "{}"; TF_VARS+=(-var "snyk_profile_orgs=[\"${PROFILE_ORG}\"]"); }
