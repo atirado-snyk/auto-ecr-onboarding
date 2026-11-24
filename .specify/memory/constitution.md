@@ -4,10 +4,13 @@
 
 ### I. The Starting State Is Never Touched
 
-The tool connects an **existing** ECR registry to an **existing** Snyk org, and removes only what it
+The tool connects **existing** ECR registries to an **existing** Snyk org, and removes only what it
 created. It MUST NOT create or delete a Snyk org, an ECR registry, or images. Every delete MUST be
-limited to the sync policy, the credentials stored in the org's ECR integration, and ECR projects
-under a caller-supplied literal repository prefix. A unit test MUST enforce that list of deletes.
+limited to one connection's sync policy; that connection's stored credentials (default mode) or the
+connection itself (profiles mode); and ECR projects of that connection, selected in default mode by a
+caller-supplied literal repository prefix and in profiles mode by Snyk's record of the importing
+connection, optionally narrowed by a prefix. A unit test MUST enforce that list of deletes in each
+mode.
 
 Rationale: operators run the tool against production orgs and registries, so its blast radius has to
 be provably bounded.
@@ -80,15 +83,23 @@ Rationale: the description of the tool and the tool itself stay one change apart
 These hold for every feature. Changing one requires a spec amendment and a MAJOR or MINOR
 constitution amendment.
 
-- **One registry per Snyk org.** One ECR registry (one AWS account and one region) maps to exactly one
-  Snyk org, because Snyk allows one ECR integration per org.
-- **One role per AWS account.** The orgs of one account share one IAM role whose trust policy lists
-  every one of their org IDs. Retiring a region removes that org ID from the list; it MUST NOT destroy
-  the shared role.
+- **Connections per org depend on Snyk's setting.** In default mode an org holds at most one ECR
+  connection, so one ECR registry (one AWS account and one region) maps to one org. When Snyk has
+  enabled multiple profiles for the org (profiles mode), the org holds any number of named
+  connections, to registries in any accounts and regions. The tool takes the mode from the org, never
+  from a guess, and every change acts on exactly one connection.
+- **Provenance comes from Snyk.** In profiles mode, which connection imported a project is taken from
+  Snyk's record, never inferred from repository names.
+- **One role per AWS account.** The orgs that read an account's registries share one IAM role whose
+  trust policy lists each of those orgs once, independent of regions. An org ID leaves the list only
+  when that org no longer reads any of the account's registries, and retiring a registry MUST NOT
+  destroy the shared role.
 - **Least privilege for Snyk.** Snyk may assume the role only from the tenant's Snyk principal and
   only with its org ID as `sts:ExternalId`, and the role grants read-only ECR actions.
-- **API split.** The v1 API (deprecated, with no REST equivalent) is used only for listing, creating
-  and updating the ECR integration and deleting its credentials. Everything else uses the REST API.
+- **API split by mode.** In default mode, the v1 API (deprecated by Snyk) is used only for listing,
+  creating and updating the ECR integration and deleting its credentials. In profiles mode,
+  connections are managed only through Snyk's REST Integrations API. Everything else uses the REST API
+  in both modes.
 
 ## Development Workflow and Quality Gates
 
@@ -115,4 +126,4 @@ is used. Where they conflict, this document wins until it is amended.
 - **Compliance**: every `plan.md` carries a Constitution Check against the current version. A
   violation MUST be justified in that plan's Complexity Tracking table or the plan does not proceed.
 
-**Version**: 1.0.0 | **Ratified**: 2026-11-24 | **Last Amended**: 2026-11-24
+**Version**: 2.0.0 | **Ratified**: 2026-11-24 | **Last Amended**: 2026-11-24
