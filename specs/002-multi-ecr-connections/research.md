@@ -1,7 +1,8 @@
 # Research: Several ECR connections in one Snyk org
 
 Seeded during `/speckit-specify` on 2026-11-24 so the findings are not lost; `/speckit-plan` completes
-it (Phase 0). Sources are Snyk-internal unless marked public.
+it (Phase 0). Sources are Snyk-internal unless marked public. Account and Snyk IDs from the sandbox
+appear as placeholders: `123456789012`, `<profile-id>`, `<project-id>`, and `<target-id>`.
 
 ## What is known
 
@@ -198,6 +199,12 @@ anything else.
   exactly where an image came from, and a re-run for the same ECR reaches the same connection. The
   engineer may give another name, such as the environment. `teardown` still needs the name.
 - **Snyk's UI is out of scope**: the tool onboards through the API, and Snyk's UI follows.
+- **A connection made before the flag is a named connection** (owner, second round): it keeps the
+  name Snyk gives it, every operation works on it, and a run without a name for its ECR reaches it
+  instead of creating a duplicate.
+- **A name reused for another ECR is refused** (owner, second round): when `apply` names a connection
+  with a different AWS account or region than it stores, nothing changes unless the engineer asks to
+  repoint it.
 
 ## What planning must find out
 
@@ -224,3 +231,7 @@ anything else.
 9. **Whether Snyk will publish the integrations API.** Token authentication at `api.snyk.io/hidden`
    works (verified 2026-11-24); the tier is still unpublished, which decides how the plan meets
    Principle IV.
+10. **How Snyk names and exposes an ECR connection made before the flag was enabled.** The hidden list
+    shows older integrations of other types as `Default profile`; not yet seen for ECR. Also: whether
+    the hidden API reads, pauses, and deletes it like any profile, and how the tool finds a connection
+    by its ECR when the name differs (FR-005).

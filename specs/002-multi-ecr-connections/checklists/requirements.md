@@ -46,6 +46,8 @@
 - **Implementation details**: the spec names Snyk and AWS concepts and the tool's operations; the API
   facts are kept in [research.md](../research.md).
 - **Constitution**: amended to v2.0.0 in this branch before `/speckit-plan`.
-- **Validation iterations**: 3. The first draft scoped connections by region and used an
+- **Validation iterations**: 4. The first draft scoped connections by region and used an
   account-plus-region default name; the second required names; the third defaults them to the
-  registry URI, which identifies the ECR rather than a region.
+  registry URI, which identifies the ECR rather than a region. The fourth (second clarification round,
+  owner, 2026-11-24) adds the connection made before the flag (FR-004, FR-005) and refuses a name
+  reused for another ECR (FR-006); all items still pass.
