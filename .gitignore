@@ -5,3 +5,5 @@ tfplan*
 __pycache__/
 # e2e harness run state and logs
 examples/sandbox/.e2e/
+# real Terraform variable values (org IDs, Snyk principal) stay in your own repository
+*.auto.tfvars

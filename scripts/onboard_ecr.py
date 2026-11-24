@@ -469,8 +469,17 @@ def checked_dry_run(client: SnykClient, args: argparse.Namespace, integration_id
                 client._sleep(args.connect_delay)
                 continue
             if fresh:
-                raise DryRunFailed(f"{err}. Check the Snyk principal and org ID in the role's trust policy, "
-                                   "the --region, and that us-east-2 is enabled for STS.") from err
+                raise DryRunFailed(
+                    f"{err}. Snyk still cannot use the role after {attempts} attempts. Likely causes "
+                    "(this script cannot read the role's trust policy, so check them in AWS):\n"
+                    f"  - org {args.org_id} is missing from the role's sts:ExternalId list: add it to the org IDs "
+                    "the role trusts (snyk_orgs in examples/main.tf, snyk_org_ids on the module), keep every "
+                    "existing ID, and run terraform apply\n"
+                    "  - the Snyk principal in the role's trust policy is not the one your Snyk tenant's UI shows\n"
+                    f"  - --region {args.region} is not the region of the ECR registry\n"
+                    "  - us-east-2 is not enabled for STS in the AWS account\n"
+                    "The integration now exists, so after the fix re-run 'apply' with --update-credentials: it stores "
+                    "the role and region again and retries while the change propagates.") from err
             raise DryRunFailed(f"{err}. If this integration was disconnected (teardown --delete-credentials) or "
                                "points at another role/region, re-run 'apply' with --update-credentials.") from err
     raise AssertionError("unreachable")

@@ -1,0 +1,17 @@
+# For more than one region. Copy to snyk-orgs.auto.tfvars (Terraform loads *.auto.tfvars automatically),
+# stop passing snyk_orgs as -var (it would override this file), and keep it in your own
+# repository: every change to it is then a reviewed, tracked diff. This public repository ignores
+# *.auto.tfvars so real values are never committed here.
+
+# The Principal from the trust policy your Snyk tenant shows under Integrations > Amazon ECR.
+snyk_aws_principal = "<principal-arn-from-the-snyk-ui>"
+
+# One entry per ECR registry in this AWS account: region = Snyk org ID.
+# Snyk allows one ECR integration per Snyk org, so each region needs its own Snyk org.
+# Keep every entry. Terraform writes the role's trust policy exactly as listed here, so removing an
+# entry removes that org's access; remove one only to retire that region, after its teardown.
+snyk_orgs = {
+  "ap-southeast-2" = "<snyk-org-id-a>"
+  # Added later for a second region of the same account:
+  # "us-east-1" = "<snyk-org-id-b>"
+}

@@ -444,9 +444,42 @@ class ConnectOnlyTests(Quiet):
         routes = happy_routes()
         routes[("GET", "/dry_run/job-1")] = [dry_run_failed("cannot assume role")]
         c = FakeClient(routes)
-        with self.assertRaisesRegex(o.DryRunFailed, "principal and org ID"):
+        with self.assertRaisesRegex(o.DryRunFailed, "Snyk principal in the role's trust policy"):
             o.run(make_args("apply", no_sync=True, import_policy=None, repo=None), c)
         self.assertEqual(len(c.posts_to("/policy/dry_run")), 3)  # connect_retries=3
+
+    def test_exhausted_retries_name_the_org_missing_from_the_external_id_list(self):
+        routes = happy_routes()
+        routes[("GET", "/dry_run/job-1")] = [dry_run_failed("cannot assume role")]
+        c = FakeClient(routes)
+        with self.assertRaises(o.DryRunFailed) as cm:
+            o.run(make_args("apply", no_sync=True, import_policy=None, repo=None), c)
+        message = str(cm.exception)
+        self.assertIn(f"org {ORG} is missing from the role's sts:ExternalId list", message)
+        self.assertIn("keep every existing ID", message)
+        self.assertIn("--region ap-southeast-2 is not the region of the ECR registry", message)
+        self.assertIn("after 3 attempts", message)
+        # The failed run left the integration behind; the way back is --update-credentials, which retries.
+        self.assertIn("re-run 'apply' with --update-credentials", message)
+        # Only after the retries are exhausted: the per-retry lines do not carry the hint.
+        retry_lines = self.err.getvalue()
+        self.assertEqual(retry_lines.count("may still be propagating"), 2)
+        self.assertNotIn("sts:ExternalId", retry_lines)
+
+    def test_no_external_id_hint_when_the_first_attempt_succeeds_after_a_retry(self):
+        routes = happy_routes()
+        routes[("GET", "/dry_run/job-1")] = [dry_run_failed("cannot assume role"), dry_run_done(1)]
+        c = FakeClient(routes)
+        self.assertEqual(o.run(make_args("apply", no_sync=True, import_policy=None, repo=None), c), 0)
+        self.assertNotIn("sts:ExternalId", self.out.getvalue() + self.err.getvalue())
+
+    def test_reused_integration_failure_keeps_its_own_hint(self):
+        routes = happy_routes(existing=INTEGRATION)
+        routes[("GET", "/dry_run/job-1")] = [dry_run_failed("cannot assume role")]
+        with self.assertRaises(o.DryRunFailed) as cm:
+            o.run(make_args("apply", no_sync=True, import_policy=None, repo=None), FakeClient(routes))
+        self.assertIn("--update-credentials", str(cm.exception))
+        self.assertNotIn("sts:ExternalId", str(cm.exception))
 
     def test_update_credentials_counts_as_fresh(self):
         routes = happy_routes(existing=INTEGRATION)

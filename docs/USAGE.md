@@ -57,7 +57,16 @@ Snyk's own scheduled sync (at least 2 hours apart), not by push events.
 
 ### 1. Create the AWS role (Terraform)
 
-Use the module in your own Terraform; `examples/main.tf` is a minimal, working call.
+Use the module in your own Terraform; `examples/main.tf` is a minimal, working call. It takes the
+orgs as `snyk_orgs`, a region => Snyk org ID map with one entry per registry, and passes the IDs to the
+module as `snyk_org_ids`. For one region, switches are enough:
+
+```bash
+terraform apply -var 'snyk_orgs={"ap-southeast-2"="<snyk-org-uuid>"}' -var snyk_aws_principal=<Principal from the Snyk UI>
+```
+
+With more than one region, keep the map in a file instead (see
+[Another region in the same account](#another-region-in-the-same-account)).
 
 ```hcl
 module "snyk_ecr" {
@@ -79,8 +88,8 @@ terraform init && terraform plan && terraform apply
   principal is the most common failure, and the connection test catches it. Prefer that specific
   principal over trusting Snyk's whole account (`…:root`, as Snyk's AWS Partner Solution does): that
   is broader, and Snyk IaC flags it as SNYK-CC-TF-118.
-- Several Snyk orgs may share one role (for example two regions of one account): list all their
-  IDs in `snyk_org_ids`; each is an allowed `sts:ExternalId`.
+- Several Snyk orgs may share one role: each ID in `snyk_org_ids` is an allowed `sts:ExternalId`.
+  For a second region of the same account, see [Another region in the same account](#another-region-in-the-same-account).
 - If your organisation enforces a permissions boundary, pass `permissions_boundary_arn`.
 
 ### 2. Export the Snyk token
@@ -194,6 +203,104 @@ every project in the org with its origin.
 
 Exit codes: `0` success, `1` error, `2` apply refused by `--max-images`.
 
+## Another region in the same account
+
+Snyk allows one ECR integration per Snyk org: "To integrate with multiple registries, create a unique
+Organization for each one" ([Snyk docs: Configure integration for Amazon ECR](https://docs.snyk.io/scan-fix-and-prevent/scan-with-snyk/snyk-container/container-registry-integrations/integrate-with-amazon-elastic-container-registry-ecr/configure-integration-for-amazon-elastic-container-registry-ecr)).
+So a second region needs a second Snyk org. The IAM role is global to the account, so both orgs share it:
+the role trusts every org ID you list. The tool still maps one registry to one org; you choose the region
+and the org each time you run it.
+
+1. **Create the new Snyk org** (with Snyk Container), in the Snyk UI or however you create orgs today.
+   This tool does not create orgs.
+2. **List every org in a file.** Copy `examples/snyk-orgs.auto.tfvars.example` to
+   `snyk-orgs.auto.tfvars` next to your Terraform (Terraform loads `*.auto.tfvars` files automatically),
+   keep it in your own repository, and stop passing `snyk_orgs` as a `-var` switch: a switch takes
+   precedence over the file. List the existing org and add the new one:
+
+   ```hcl
+   snyk_orgs = {
+     "ap-southeast-2" = "<snyk-org-id-a>"
+     "us-east-1"      = "<snyk-org-id-b>"   # new
+   }
+   ```
+
+3. **Plan and check it.** `terraform plan` must show only an in-place update (`~`) of the role's trust
+   policy (`assume_role_policy`), with the new ID added to the `sts:ExternalId` list. If it plans to
+   **create** the role, stop: this state does not track the role (see [Existing roles](#existing-roles)).
+4. **Apply:** `terraform apply`. This changes the trust policy in place, with `iam:UpdateAssumeRolePolicy`; an
+   identity that could create the role may still lack it (see [Permissions](#permissions)).
+5. **Connect the new region**, with the new org and region and the same role ARN:
+
+   ```bash
+   uv run scripts/onboard_ecr.py plan  --org-id <snyk-org-id-b> --region us-east-1 \
+       --role-arn "$(terraform output -raw role_arn)" --import-policy Regex --tag '^v[0-9]+\.[0-9]+\.[0-9]+$'
+   uv run scripts/onboard_ecr.py apply ...same flags...
+   ```
+
+   The existing region needs nothing: its org stays in the trust policy and its integration is unchanged.
+
+**Keep every entry.** Terraform writes the trust policy exactly as listed, so removing an entry (or an ID from
+`snyk_org_ids`) removes that org's access and breaks its integration at Snyk's next sync. Remove an entry
+only to retire that region, after its `teardown`.
+
+If the new region's connection test still fails after the retries, the script lists the likely causes; the
+first to check is that the new org ID reached the role's `sts:ExternalId` list (step 4 applied). The failed run
+has already created the integration, so after the fix re-run `apply` with `--update-credentials`: a plain
+re-run reuses the integration as stored and tests the connection once, while `--update-credentials` stores
+the role and region again and retries while the change propagates.
+
+### Existing roles
+
+Before the first plan, you can see which orgs a role already trusts, read-only:
+
+```bash
+aws iam get-role --role-name <role-name> --query 'Role.AssumeRolePolicyDocument'
+```
+
+What `terraform apply` does depends on whether this Terraform state already tracks the role:
+
+| Situation | Result |
+|---|---|
+| The role was created by this configuration (same state) | In-place update of the trust policy: the expected path. |
+| A role with the same name exists but this state does not track it | Apply fails with `EntityAlreadyExists`; nothing changes. Adopt it (below) or use another `role_name`. |
+| The existing role has a different name | Terraform creates a second role; pass its ARN to the script for the new org. |
+
+### Adopting a role that already exists
+
+To manage an existing role with this module, import it rather than recreate it. Set `role_name` on the
+module to the existing name, list **every** org ID it already trusts in `snyk_orgs` (from the `get-role`
+output above), then import (an `import` block needs Terraform 1.5 or later):
+
+```hcl
+import {
+  to = module.snyk_ecr.aws_iam_role.snyk_ecr_read
+  id = "<role-name>"
+}
+import {
+  to = module.snyk_ecr.aws_iam_role_policy.ecr_read
+  id = "<role-name>:snyk-ecr-read"
+}
+```
+
+or on the command line: `terraform import module.snyk_ecr.aws_iam_role.snyk_ecr_read <role-name>` and
+`terraform import module.snyk_ecr.aws_iam_role_policy.ecr_read <role-name>:snyk-ecr-read`
+([AWS provider: aws_iam_role](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role#import),
+[aws_iam_role_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy#import)).
+Import the inline policy only if the role has one named `snyk-ecr-read`. A role made by following Snyk's UI
+instructions (for example `SnykServiceRole`, with the managed policy `AmazonEC2ContainerRegistryReadOnlyForSnyk`)
+has none: Terraform adds the inline policy, and the managed policy stays attached and is not managed by
+this module. Review the plan before applying: it should not drop any org ID or change the principal.
+
+### Terraform Enterprise
+
+Keep `snyk-orgs.auto.tfvars` in the workspace's VCS repository; Terraform Enterprise loads `*.auto.tfvars`
+files from it, so adding a region is a reviewed pull request whose speculative plan shows the trust-policy
+change. Do not also set a `snyk_orgs` workspace variable or variable set: those take precedence over
+`*.auto.tfvars` files, so the list must live in one place only. The Snyk principal can be a workspace
+variable instead of a line in the file. The script runs outside Terraform Enterprise (in CI or on a
+workstation), with the role ARN from the workspace outputs or built as `arn:aws:iam::<account-id>:role/<role-name>`.
+
 ## Running it over time
 
 You run the tool when something changes: to set up, to change the policy, and to stop. Between those
@@ -225,7 +332,7 @@ other flags: it removes just the sync policy, and `apply` resumes it.
 uv run scripts/onboard_ecr.py teardown --org-id <uuid> --repo-prefix 'team-a/' --delete-projects --delete-credentials
 # 2. execute
 uv run scripts/onboard_ecr.py teardown --org-id <uuid> --repo-prefix 'team-a/' --delete-projects --delete-credentials --yes
-# 3. AWS: remove the role
+# 3. AWS: remove the role (when this was the account's last region; otherwise see below)
 terraform destroy
 # 4. Optional, UI only: Integrations → Amazon ECR → remove the empty integration entry
 ```
@@ -235,7 +342,12 @@ terraform destroy
 | Sync policy (stops auto-import) | always | Done first, so deleted projects are not re-imported by the next sync. |
 | Imported projects | `--delete-projects` + `--repo-prefix` | Only projects with origin `ecr` whose repository name starts with the literal prefix. |
 | Role ARN / region stored in the integration | `--delete-credentials` | Snyk can no longer assume your role. Uses the v1 "Delete credentials" call. |
-| IAM role | `terraform destroy` | |
+| IAM role | `terraform destroy` | Only when no other region of the account uses it. |
+
+**Retiring one region of several.** The orgs of one account share the role, so do not destroy it. Run the
+teardown above for that region's org, remove its entry from `snyk-orgs.auto.tfvars`, check that
+`terraform plan` shows only an in-place update of the trust policy dropping that org ID, and apply. The other
+regions keep working.
 
 **Never touched:** the Snyk org (members, settings, other integrations, projects outside the
 prefix), the ECR registry and its images, and the AWS account. The script contains no org-level
@@ -253,6 +365,13 @@ UI (step 4) if you want it gone. Re-onboarding the same org reuses it with `appl
 **AWS (whoever runs Terraform)**: permission to create, read, tag, update and delete an IAM role and its
 inline policy (the module manages one `aws_iam_role` and one `aws_iam_role_policy`). If Service Control
 Policies or a permissions boundary restrict IAM, allow those operations for this role.
+
+Adding or removing a region (an org ID) later changes the role's trust policy in place, which is its own IAM
+action: `iam:UpdateAssumeRolePolicy`, which "updates the policy that grants an IAM entity permission to assume a
+role" ([AWS IAM API reference](https://docs.aws.amazon.com/IAM/latest/APIReference/API_UpdateAssumeRolePolicy.html)).
+An identity allowed to create the role does not necessarily have it: in the e2e run, an SSO role that created
+the role was refused this call (`AccessDenied`), and the trust policy stayed as it was. Grant it, scoped to
+the role, to whoever will maintain the list.
 
 **What Snyk gets in AWS**: assume the role (only with your org ID as ExternalId), and read-only ECR:
 `ecr:BatchCheckLayerAvailability`, `BatchGetImage`, `DescribeImages`, `DescribeRepositories`,
@@ -289,15 +408,21 @@ that person's permissions, so use one only for testing.
 - **User-supplied regexes** are never compiled or run locally; Snyk evaluates them (RE2) and the preview
   reports errors. Teardown is scoped by a literal prefix for the same reason, and is a dry run unless `--yes`.
 - **Scans.** `make scan` runs `snyk code test` (no issues) and `snyk iac test` (no issues on the module;
-  two accepted low findings on the test fixture: mutable tags and AWS-managed encryption).
+  two accepted low findings on each of the two test fixture repositories: mutable tags and AWS-managed
+  encryption).
 
 ## Constraints
 
 1. **One registry per Snyk org.** An org's ECR integration has a single region and role. Two
-   accounts, or two regions of one account, need two orgs.
+   accounts, or two regions of one account, need two orgs (see
+   [Another region in the same account](#another-region-in-the-same-account)).
+   Snyk has a closed beta that lets one org hold several ECR integrations ("profiles"). Do not run this
+   tool against an org that has it enabled: the tool finds the org's ECR integration through the v1 list,
+   which then names only one of them, so `status`, `apply` and `teardown` can act on the wrong
+   integration (verified in a test org, November 2026).
 2. **One-to-one by design.** The tool maps one registry to one org; it does not loop over
-   accounts. Drive it once per registry (for example one module block and one script run in CI
-   per registry).
+   accounts or regions. Drive it with one module call (one role) per AWS account, listing that account's
+   orgs, and one script run per registry, for example from CI.
 3. **Snyk principal is tenant-specific** and Snyk's to change. It is a required input, taken from your
    tenant's Snyk UI; the connection test proves it.
 4. **v1 API dependency.** Integration create/list/update/credential delete exist only in the v1 API,
@@ -324,16 +449,23 @@ that person's permissions, so use one only for testing.
     ([TESTING.md](TESTING.md)): role with the UI-prescribed principal, integration create, connection test
     (including the propagation retry), Regex sync preview and apply, the import of exactly the matching tag,
     teardown of policy, projects and credentials, and the disconnect; repeated with an org-level service
-    account (access token, Org Admin) in place of the personal access token.
+    account (access token, Org Admin) in place of the personal access token. Two regions of one account
+    (2026-10-19, `ap-southeast-2` and `us-east-1`, personal access token): a role from `-var` switches, and a
+    role from `snyk-orgs.auto.tfvars` trusting two orgs from the start, each connecting and syncing exactly the
+    matching tag in its own region; the plan for adding a region was exactly an in-place update of the trust
+    policy; an org the role did not trust yet failed after the retries with the `sts:ExternalId` hint;
+    teardown of every org and the role. Not yet verified live: applying the in-place update (adding or
+    retiring a region), which the test identity was not allowed to do (`iam:UpdateAssumeRolePolicy`).
 
 ## Troubleshooting
 
 | Symptom | Likely cause / fix |
 |---|---|
+| `terraform apply` when adding or removing a region: `AccessDenied` … `iam:UpdateAssumeRolePolicy` | The identity running Terraform may create roles but not change their trust policy. Nothing changed (existing regions keep working); grant that action for the role ([Permissions](#permissions)) and apply again. |
 | `HTTP 401` | Token wrong, expired, or for another tenant (check `SNYK_API_BASE`). |
 | `HTTP 403` on create | Token lacks Org Admin / *Edit Integrations*. |
 | `cannot reach … certificate verify failed` | Network, proxy or TLS interception between you and `api.snyk.io`. |
-| Connection test fails right after a new role, even after retries | Wrong Snyk principal for the tenant, wrong org ID in `snyk_org_ids`, wrong `--region`, or `us-east-2` STS disabled. |
+| Connection test fails right after a new role, even after retries | This org ID missing from the role's trust (`snyk_orgs` / `snyk_org_ids`, then `terraform apply`), wrong Snyk principal for the tenant, wrong `--region`, or `us-east-2` STS disabled. The script lists these causes; after the fix, re-run `apply --update-credentials`. |
 | Connection test fails on an existing integration | It was disconnected (`teardown --delete-credentials`) or points at another role/region: re-run `apply --update-credentials`. |
 | Preview shows 0 images | The policy matches nothing (`repo` and `tag` apply separately), the registry/region has no images, or `ImportAllNew` (which never imports images that already exist). |
 | `Refusing to apply: N images…` | Above `--max-images`. Narrow the policy or pass `--force`. |
