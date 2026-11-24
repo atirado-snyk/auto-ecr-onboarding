@@ -1,11 +1,14 @@
 import argparse
 import contextlib
+import http.client
+import http.server
 import io
 import json
 import os
 import pathlib
 import sys
 import tempfile
+import threading
 import unittest
 import urllib.error
 
@@ -270,6 +273,18 @@ class ValidationTests(Quiet):
             o.validate_inputs(make_args("teardown", delete_projects=True, repo_prefix=None))
 
 
+@contextlib.contextmanager
+def loopback(handler_class):
+    """A throwaway HTTP server on 127.0.0.1 for tests of the real transport: loopback only, no network."""
+    server = http.server.HTTPServer(("127.0.0.1", 0), handler_class)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 class TransportTests(Quiet):
     def test_backs_off_on_rate_limit(self):
         c = FakeClient({("GET", "/v1/org/"): [(429, {}), (200, {})]})
@@ -296,6 +311,52 @@ class TransportTests(Quiet):
         c = FakeClient({("GET", "/v1/org/"): [(200, "<html>proxy login</html>")]})
         with self.assertRaisesRegex(RuntimeError, "non-JSON"):
             c.list_integrations(ORG)
+
+    def test_redirects_are_refused_so_the_token_reaches_no_other_host(self):
+        """The real transport, not FakeClient: urllib follows redirects by itself and resends the
+        Authorization header to whatever host the Location names, from https to http too."""
+        received = []
+
+        class Elsewhere(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                received.append(self.headers.get("Authorization"))
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, *args):
+                pass
+
+        with loopback(Elsewhere) as elsewhere:
+            class Redirecting(http.server.BaseHTTPRequestHandler):
+                def do_GET(self):
+                    self.send_response(302)
+                    self.send_header("Location", f"{elsewhere}/collect")
+                    self.end_headers()
+
+                def log_message(self, *args):
+                    pass
+
+            with loopback(Redirecting) as snyk:
+                client = o.SnykClient("test-token", "https://api.snyk.io", "2025-09-17", max_retries=0)
+                with self.assertRaisesRegex(RuntimeError, "redirect") as cm:
+                    client.request("GET", f"{snyk}/v1/org/{ORG}/integrations")
+        self.assertEqual(received, [], "the redirect target must receive no request at all")
+        self.assertNotIn("test-token", str(cm.exception))
+
+    def test_a_connection_lost_while_reading_is_a_clean_error_without_the_token(self):
+        failures = [http.client.IncompleteRead(b'{"partial":', 89), TimeoutError("timed out"),
+                    ConnectionResetError(54, "Connection reset by peer")]
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                class Broken(FakeClient):
+                    def _send(self, method, url, headers, body, failure=failure):
+                        raise failure
+                with self.assertRaises(RuntimeError) as cm:
+                    Broken({}).list_integrations(ORG)
+                self.assertIn("while reading", str(cm.exception))
+                self.assertIn(str(failure), str(cm.exception))
+                self.assertNotIn("test-token", str(cm.exception))
 
     def test_token_never_logged_in_errors(self):
         c = FakeClient({("GET", "/v1/org/"): [(500, {"e": 1})]})

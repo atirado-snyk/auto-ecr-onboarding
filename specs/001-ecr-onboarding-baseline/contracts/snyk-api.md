@@ -1,6 +1,7 @@
 # Contract: Snyk API calls made by `onboard_ecr.py`
 
-Every call the script makes, as delivered at `f035a43`. This is the complete list: a call that is
+Every call the script makes, as delivered at `f035a43`, with the transport rules as amended by tasks
+T046 and T047. This is the complete list: a call that is
 not here is not made. Permissions are as `docs/USAGE.md` lists them from the published v1 OpenAPI
 spec and the REST spec `2026-03-25`; requests are sent with REST version `2025-09-17` by default,
 which passed live on 2026-11-24 ([research O1](../research.md#open-items)).
@@ -45,5 +46,6 @@ changes a registry. Org creation and deletion exist only in the e2e harness
 | Timeout | 60 seconds per request |
 | Transient retries | On 429, 500, 502, 503, and 504: up to 5 retries, waiting `Retry-After` seconds (any letter case; an HTTP date falls back to the default) or 1, 2, 4, 8, and 16 seconds, at most 60 seconds per wait |
 | Propagation retries | Call 2 is retried `--connect-retries` times, `--connect-delay` apart, except on 401, 403, and 404; the connection test (calls 5 and 6) likewise, but only when the credentials were set in this run |
-| Errors | A non-2xx answer raises an error naming the method, the URL, the status, and the first 500 characters of the body; a network failure or a non-JSON success body raises a clear error; none includes the token |
+| Errors | A non-2xx answer raises an error naming the method, the URL, the status, and the first 500 characters of the body; a network failure, also one while the body is read, or a non-JSON success body raises an error that states the cause; none includes the token |
+| Redirects | Never followed: a 3xx answer ends the call with an error naming the method, the URL, the status, and where the redirect pointed, so the `Authorization` header goes only to the validated API host (T046) |
 | Pagination | `links.next` may be relative to the REST base, with or without the `/rest` prefix, or absolute on the same host; a link to any other host is refused |

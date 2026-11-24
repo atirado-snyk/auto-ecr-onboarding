@@ -4,8 +4,8 @@
 
 **Input**: Feature specification from `specs/001-ecr-onboarding-baseline/spec.md`
 
-**Note**: This is an as-built plan. It records how the delivered code at `f035a43` meets the spec and
-proposes no new implementation. [tasks.md](tasks.md) records the delivered work by story and carries
+**Note**: This is an as-built plan. It records how the delivered code at `f035a43`, plus the two
+convergence fixes (tasks T046 and T047), meets the spec, and proposes no new implementation. [tasks.md](tasks.md) records the delivered work by story and carries
 the open items as tasks. The next behavior change starts the full cycle (`/speckit-specify` or an
 amendment, then plan, tasks, implement, converge).
 
@@ -36,7 +36,8 @@ meet at one value, the role ARN:
 own repository.
 
 **Testing**: `unittest` with `FakeClient`, a transport double that replays scripted responses and
-records every call; `terraform test` with the AWS provider mocked (`examples/snyk_orgs.tftest.hcl`);
+records every call, plus one test of the real transport against loopback servers (the redirect
+refusal); `terraform test` with the AWS provider mocked (`examples/snyk_orgs.tftest.hcl`);
 both run by `make check`. Live: `examples/sandbox/e2e.sh` with `harness.py` (throwaway orgs, ECR
 repositories in two regions). See [quickstart.md](quickstart.md).
 
@@ -68,7 +69,7 @@ v1.0.0.
 | III. Safe by default | Read-only counterparts, `--yes`, idempotent, no default policy, image limit | Pass | FR-010, FR-017, FR-022, FR-025 rows below |
 | IV. Snyk's own terms | Snyk vocabulary, published specs, undocumented behavior marked and verified | Pass, one open item | Requests are sent as `2025-09-17`, which passed live on 2026-11-24, while the docs cite the REST spec `2026-03-25` as checked ([research O1](research.md#open-items)); task T038 settles which is the contract, before feature 002 builds on the same version |
 | V. Offline verification | `make check` green with no network or credentials | Pass | Re-run 2026-11-24 on `f035a43` |
-| VI. Secrets stay out | Token from env only, Snyk hosts only, never printed; real values gitignored | Pass | FR-030 and FR-031 rows; `.gitignore` covers `*.auto.tfvars` |
+| VI. Secrets stay out | Token from env only, Snyk hosts only, never printed; real values gitignored | Pass | FR-030 and FR-031 rows, including the redirect refusal (T046); `.gitignore` covers `*.tfvars` |
 | VII. Claim only what was verified | Verified, live, and unverified kept apart | Pass | `README.md` Status; [spec Verification Status](spec.md#verification-status) |
 | VIII. Spec is the contract | Living spec with diagrams | Pass | This baseline establishes it |
 | Product invariants | One registry per org; one role per account; least privilege; API split | Pass | FR-001, FR-005, FR-006, FR-009; [contracts/snyk-api.md](contracts/snyk-api.md) |
@@ -217,7 +218,7 @@ examples/
 ├── snyk-orgs.auto.tfvars.example   # Template for the operator's own region-to-org file
 └── sandbox/                        # Live e2e harness: e2e.sh, harness.py, fixture/, main.tf
 tests/
-├── test_onboard_ecr.py             # 74 unit tests of the script (FakeClient)
+├── test_onboard_ecr.py             # 76 unit tests of the script (FakeClient; one on loopback)
 └── test_harness.py                 # 12 unit tests of the e2e harness's safety guards
 docs/USAGE.md, docs/TESTING.md      # Operator guide and test guide
 Makefile                            # test, tf-validate, tf-test, check, scan, aws-whoami
@@ -266,8 +267,8 @@ tree later committed as `f035a43`), and the steps of `e2e.sh single`, in order, 
 | FR-028 | `run_teardown`: final message | None | Printed in every e2e teardown |
 | FR-029 | Deletes return False on 404 | `test_reports_credentials_already_removed_on_a_rerun`, `test_missing_policy_is_not_an_error`, `test_without_an_integration_only_projects_can_be_removed` | — |
 | FR-030 | `main` | None | — |
-| FR-031 | `validate_api_base`, `ApiError`, `SnykClient._follow` | `test_token_only_goes_to_snyk_https_hosts`, `test_token_never_logged_in_errors`, `test_network_errors_become_clean_errors_without_the_token`, `test_refuses_pagination_link_to_other_host` | — |
-| FR-032 | `SnykClient.request`, `retry_after_seconds` | `test_backs_off_on_rate_limit`, `test_retry_after_is_case_insensitive_and_tolerates_dates`, `test_network_errors_become_clean_errors_without_the_token`, `test_non_json_success_body_is_a_clean_error` | — |
+| FR-031 | `validate_api_base`, `ApiError`, `SnykClient._follow`, `_RefuseRedirects` | `test_token_only_goes_to_snyk_https_hosts`, `test_token_never_logged_in_errors`, `test_network_errors_become_clean_errors_without_the_token`, `test_refuses_pagination_link_to_other_host`, `test_redirects_are_refused_so_the_token_reaches_no_other_host` | — |
+| FR-032 | `SnykClient.request`, `retry_after_seconds` | `test_backs_off_on_rate_limit`, `test_retry_after_is_case_insensitive_and_tolerates_dates`, `test_network_errors_become_clean_errors_without_the_token`, `test_a_connection_lost_while_reading_is_a_clean_error_without_the_token`, `test_non_json_success_body_is_a_clean_error` | — |
 | FR-033 | `--api-base`, `SNYK_API_BASE` | `test_token_only_goes_to_snyk_https_hosts` accepts `https://api.eu.snyk.io` | US tenant only |
 | FR-034 | `main`, `run` | Exit 0 in most workflow tests; exit 2 in `test_max_images_guard_blocks_apply`; exit 1: none | — |
 

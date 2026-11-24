@@ -404,7 +404,8 @@ that person's permissions, so use one only for testing.
 - **Least privilege.** Read-only ECR actions only, on all repositories. To restrict it to specific
   repositories, scope `Resource` in the inline policy; `ecr:GetAuthorizationToken` only supports `*`.
 - **Secrets.** The token is read from `SNYK_TOKEN` only, is sent only to `https://*.snyk.io`, and is
-  never logged. It never appears in Terraform state.
+  never logged. It never appears in Terraform state. Redirects are never followed, so an answer that
+  points elsewhere cannot carry the token to another host.
 - **User-supplied regexes** are never compiled or run locally; Snyk evaluates them (RE2) and the preview
   reports errors. Teardown is scoped by a literal prefix for the same reason, and is a dry run unless `--yes`.
 - **Scans.** `make scan` runs `snyk code test` (no issues) and `snyk iac test` (no issues on the module;
@@ -465,6 +466,8 @@ that person's permissions, so use one only for testing.
 | `HTTP 401` | Token wrong, expired, or for another tenant (check `SNYK_API_BASE`). |
 | `HTTP 403` on create | Token lacks Org Admin / *Edit Integrations*. |
 | `cannot reach … certificate verify failed` | Network, proxy or TLS interception between you and `api.snyk.io`. |
+| `… answered HTTP 3xx, a redirect to …; not followed` | Something between you and Snyk, or Snyk's API itself, answered with a redirect. The tool never follows one, so the token stayed put; check proxies and `SNYK_API_BASE`, and ask Snyk if it persists. |
+| `connection lost while reading …` | The connection broke mid-answer (a timeout or a reset). Re-run: every mode is safe to repeat. |
 | Connection test fails right after a new role, even after retries | This org ID missing from the role's trust (`snyk_orgs` / `snyk_org_ids`, then `terraform apply`), wrong Snyk principal for the tenant, wrong `--region`, or `us-east-2` STS disabled. The script lists these causes; after the fix, re-run `apply --update-credentials`. |
 | Connection test fails on an existing integration | It was disconnected (`teardown --delete-credentials`) or points at another role/region: re-run `apply --update-credentials`. |
 | Preview shows 0 images | The policy matches nothing (`repo` and `tag` apply separately), the registry/region has no images, or `ImportAllNew` (which never imports images that already exist). |

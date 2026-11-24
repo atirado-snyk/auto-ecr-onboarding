@@ -227,9 +227,11 @@ projects imported so far, without changing anything.
 - **No token**: the tool refuses to start. **A rejected token or missing permission**: reported, not
   retried.
 - **Rate limiting or a Snyk server error**: retried with backoff that follows Snyk's hint.
-- **A network or TLS failure, or a success response that is not JSON**: an error that states the
-  cause and does not contain the token.
+- **A network or TLS failure, also while a response is being read, or a success response that is not
+  JSON**: an error that states the cause and does not contain the token.
 - **A paging link that points away from the Snyk API host**: refused.
+- **A redirect from the Snyk API**: not followed; the call fails with an error that says where the
+  redirect pointed, so the token never reaches another host.
 - **Teardown on an org with no connection**: only projects can be removed.
 
 ## Requirements *(mandatory)*
@@ -331,7 +333,8 @@ projects imported so far, without changing anything.
 - **FR-030**: The Snyk token MUST be read only from the environment; without it, the tool MUST refuse
   to start.
 - **FR-031**: The token MUST be sent only to Snyk API hosts over HTTPS and MUST NOT appear in output or
-  errors; paging links that lead away from that host MUST be refused.
+  errors; paging links that lead away from that host MUST be refused, and redirects MUST NOT be
+  followed.
 - **FR-032**: Transient Snyk failures (rate limiting, server errors) MUST be retried with backoff that
   honors Snyk's retry hint, waiting at most 60 seconds each time. Network failures and success
   responses that are not JSON MUST end in an error that states the cause.
@@ -409,6 +412,7 @@ Per Constitution Principle VII. Details per requirement are in
 | Live only, no offline test | FR-005, FR-006, FR-007 (the role, its trust, its permissions, the principal input); FR-028 (the "not removed" report) | From-scratch end-to-end runs on the US tenant ([docs/TESTING.md](../../docs/TESTING.md)): every scenario on 2026-10-19, from the working tree later committed as `f035a43`; the steps of `e2e.sh single` (scenario 1 and the whole-account teardown), in order, on 2026-11-24 at `f035a43` itself; all checks passed |
 | Live, partly | FR-009: the in-place plan was verified; applying it was not | The test identity lacked `iam:UpdateAssumeRolePolicy` |
 | Not verified live | FR-033 on the EU and AU tenants | Only the US tenant was tested |
+| Offline only, so far | FR-031's redirect refusal and FR-032's errors while a response is read (tasks T046, T047) | The unit tests pass, 88 of them, on Python 3.10 (2026-11-24); `make check` and the e2e on the fix are pending |
 | Observed live, outside the e2e | FR-016: the single-connection limitation | A test org with the beta enabled, November 2026 (`docs/USAGE.md`, Constraints 1) |
 | Code review only | FR-001; FR-030 (missing token); FR-034's exit code 1 | No test exercises these paths |
 

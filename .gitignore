@@ -7,3 +7,7 @@ __pycache__/
 examples/sandbox/.e2e/
 # real Terraform variable values (org IDs, Snyk principal) stay in your own repository
 *.auto.tfvars
+# any Terraform variable file, for the same reason (constitution Principle VI)
+*.tfvars
+# macOS Finder metadata
+.DS_Store

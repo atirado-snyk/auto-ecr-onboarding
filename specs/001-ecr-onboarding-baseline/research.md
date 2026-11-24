@@ -98,14 +98,17 @@ Each rationale says where it comes from: **stated** means the repository's docs 
 ### D11. Token handling
 
 - **Decision**: read the token from `SNYK_TOKEN` only, send it as `Authorization: token …`, and only to
-  `https://*.snyk.io`.
+  `https://*.snyk.io`. Redirects are never followed: `urllib` would resend the header to whatever host
+  a redirect names, from HTTPS to HTTP too (found by `/speckit-converge` on 2026-11-24, fixed in task
+  T046).
 - **Rationale**: stated. The v1 API documents that scheme (`docs/USAGE.md`, Prerequisites). OAuth 2.0
   service accounts, which use `Authorization: bearer …`, are not supported yet (O9).
 
 ### D12. Offline tests at the transport boundary
 
 - **Decision**: unit tests replace only the HTTP send and the sleep (`FakeClient`), so everything above
-  them runs for real; `terraform test` mocks the AWS provider and covers the inputs only.
+  them runs for real; `terraform test` mocks the AWS provider and covers the inputs only. One test runs
+  the real send against loopback servers, because the redirect refusal lives below the send.
 - **Rationale**: stated (`tests/test_onboard_ecr.py` docstring, `examples/snyk_orgs.tftest.hcl`
   header). Request shapes come from the published v1 OpenAPI spec and a REST spec (`README.md`,
   Status).
