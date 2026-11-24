@@ -33,18 +33,36 @@ it (Phase 0). Sources are Snyk-internal unless marked public.
   came from, and saving an import policy in the UI failed with "Integration ID is required" (worked
   around through the API). (Slack, July 2026.)
 
+## Decisions from clarification (owner, 2026-11-24)
+
+- **Scope**: several ECRs per org; the region is an attribute of a connection and orthogonal to the
+  feature. The first spec draft framed connections around regions; that framing was dropped.
+- **Two modes**, decided by Snyk's flag on the org: default (baseline unchanged) and profiles.
+- **Provenance instead of prefix matching**: overlapping repositories across environments are expected,
+  so a project's connection must come from Snyk's record, and teardown selects projects by connection.
+- **Disconnect means delete**: removing a connection deletes it; its scans stay as history.
+- **Names are required in profiles mode, with no default.** The engineer's label (typically the
+  environment) is what makes "where was this image picked up" readable. Chosen while re-scoping, in
+  line with the provenance answer; a derived default such as account plus region would carry no
+  meaning.
+
 ## What planning must find out
 
-1. **The REST Integrations API's exact shape**: path prefix, API version and stability, request and
+1. **Whether Snyk's public API exposes which connection imported a project.** This decides FR-011 and
+   FR-013: without it, project removal is refused in profiles mode. Candidates: the project's target
+   (the ADR ties org targets to the integration's `orgSourcePublicId`), or a relationship or attribute
+   on the project itself. If neither is public, the fallback is a request to Snyk; the tool must not
+   guess.
+2. **The REST Integrations API's exact shape**: path prefix, API version and stability, request and
    response attributes for ECR (`profile_name`, region, role ARN), and required token permissions.
    The public API reference has no page for it (`docs.snyk.io/snyk-api/reference/integrations`
    returned 404 on 2026-11-24). Likely sources: the beta documentation given to enrolled customers,
    or Snyk's internal OpenAPI spec.
-2. **Whether the public projects or targets API exposes which connection imported a project.** This
-   decides FR-011.
-3. **How the tool can tell that an org has the feature**: for example whether the REST listing answers
-   differently for orgs without the flag.
+3. **How the tool tells an org's mode** (FR-002): for example whether the REST listing answers
+   differently for orgs without the flag, or whether Snyk exposes the flag.
 4. **Whether the external ID stays the org ID** for every connection.
-5. **What `DELETE` does to the connection's projects** beyond stopping their recurring tests. This
-   informs FR-012.
+5. **What `DELETE` does to the connection's projects**: the assumption is that they remain and stop
+   being retested (FR-014); verify live.
 6. **What happens to extra connections if the flag is turned off.**
+7. **How the Terraform input states account access without regions** (FR-016) while the baseline's
+   region-to-org map keeps working for default mode (FR-017).

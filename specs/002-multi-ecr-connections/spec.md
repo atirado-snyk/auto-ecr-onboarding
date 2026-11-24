@@ -1,146 +1,213 @@
-# Feature Specification: Several ECR connections in one Snyk org
+# Feature Specification: Several ECR registries in one Snyk org
 
 **Feature Branch**: `002-multi-ecr-connections`
 
 **Created**: 2026-11-24
 
-**Status**: Draft, two clarifications open
+**Status**: Draft, clarified 2026-11-24
 
 **Input**: User description: "Support Snyk orgs that have the multiple ECR connections feature
 enabled, so one org can hold several ECR connections. It is a feature flag; customers need to have
-it enabled."
+it enabled." Clarified: "The requirement is to be able to add multiple ECRs to the same org. The
+region is independent (orthogonal) to it. A customer might operate one ECR for every environment, so
+repositories overlap, and it should be clear where a vulnerable image was picked up. Removing a
+connection deletes it, which is the same as disconnecting, and leaves the scans as history. The tool
+works in the default behavior (one ECR per org) and, when the flag is enabled, in the new behavior
+(many ECRs per org, managed as profiles)."
 
-> **Relation to the baseline.** This feature changes the behavior specified in
-> [001](../001-ecr-onboarding-baseline/spec.md). It replaces baseline FR-016 and extends FR-008,
-> FR-011, FR-024, FR-025, FR-027, and FR-028 for orgs with the feature enabled. Everything else in
-> 001 still holds, and for orgs without the feature nothing changes (FR-001 below).
+> **Relation to the baseline.** For orgs without the feature nothing changes: baseline
+> [001](../001-ecr-onboarding-baseline/spec.md) applies as written (FR-001 below). For orgs with the
+> feature, this spec replaces baseline FR-016 and extends FR-008, FR-011, FR-024, FR-025, FR-026,
+> FR-027, and FR-028.
 >
-> **Constitution impact.** It redefines the product invariant "One registry per Snyk org", so the
-> constitution must be amended before `/speckit-plan` (Constitution, Product Invariants).
+> **Constitution impact.** It changes Principle I (what may be deleted) and the product invariants on
+> connections per org, role trust, and the API split: constitution v2.0.0.
 
 ## Overview
 
-Snyk can enable a feature for a customer that lets one Snyk org hold several ECR connections, each
-with its own name. Without it, every registry (every region of every account) needs its own org,
-which splits reporting and issue management across orgs; some enterprise customers will not onboard
-to Snyk Container while that holds. With the feature on, the connections of one org can point at
-registries in different regions and different AWS accounts.
+The tool runs in one of two modes, decided by whether Snyk has enabled its multiple-profiles feature
+for the org. The engineer does not choose the mode; the org's setting does.
+
+```mermaid
+flowchart TD
+    run(["A run of the tool against one Snyk org"]) --> mode{"Has Snyk enabled multiple profiles for this org?"}
+    mode -- "no" --> def["Default mode: at most one ECR connection; baseline 001 unchanged; a connection name is refused"]
+    mode -- "yes" --> prof["Profiles mode: any number of named connections; every change names one"]
+```
+
+In profiles mode an org holds any number of ECR connections. Each one is a **named connection**
+(Snyk calls it a profile) to one ECR registry, which is one AWS account and one region. Any mix is
+allowed: several accounts in the same region, several regions of the same account, or both. The
+region is an attribute of a connection and constrains nothing else. Names are the engineer's
+labels, typically the environment, such as `prod` or `staging`.
 
 ```mermaid
 flowchart TB
-    subgraph ORG["Snyk org, with named connections enabled"]
-        c1["Connection prod-ap-southeast-2"]
-        c2["Connection prod-us-east-1"]
-        c3["Connection staging-ap-southeast-2"]
+    subgraph ORG["Snyk org in profiles mode"]
+        cp["prod"]
+        cs["staging"]
+        cd["dr"]
     end
-    subgraph PROD["AWS account: production"]
-        rp{{"Access role, trusts the org once"}}
-        rp1[("Registry in ap-southeast-2")]
-        rp2[("Registry in us-east-1")]
+    subgraph A["AWS account 111111111111"]
+        ra{{"Access role, trusts the org once"}}
+        a1[("ECR in ap-southeast-2")]
+        a2[("ECR in us-east-1")]
     end
-    subgraph STG["AWS account: staging"]
-        rs{{"Access role, trusts the org once"}}
-        rs1[("Registry in ap-southeast-2")]
+    subgraph B["AWS account 222222222222"]
+        rb{{"Access role, trusts the org once"}}
+        b1[("ECR in ap-southeast-2")]
     end
-    c1 --> rp
-    c2 --> rp
-    c3 --> rs
-    rp -. "read" .-> rp1
-    rp -. "read" .-> rp2
-    rs -. "read" .-> rs1
+    cp -- "ap-southeast-2" --> ra
+    cd -- "us-east-1" --> ra
+    cs -- "ap-southeast-2" --> rb
+    ra -. "read" .-> a1
+    ra -. "read" .-> a2
+    rb -. "read" .-> b1
 ```
 
-Each connection has its own read proof, sync policy, and lifecycle (the 001 lifecycle diagram applies
-per connection). The account's access role trusts the org once, however many of the account's
-registries the org connects to, so connecting another region of an account the org already uses
-needs no change in AWS.
+**Where an image came from.** When environments share repository names, the same image appears in
+several registries. Each copy becomes its own project in Snyk, and the tool always says which
+connection imported it. It never infers that from the repository name.
+
+```mermaid
+flowchart LR
+    subgraph P["ECR of connection prod"]
+        p1["team-a/app:v1.4.0"]
+    end
+    subgraph S["ECR of connection staging"]
+        s1["team-a/app:v1.4.0"]
+    end
+    subgraph ORG["Snyk org"]
+        pp["Project team-a/app:v1.4.0, from prod"]
+        sp["Project team-a/app:v1.4.0, from staging"]
+    end
+    p1 -- "imported through prod" --> pp
+    s1 -- "imported through staging" --> sp
+```
+
+Each connection follows the baseline's lifecycle on its own, with one difference: disconnecting
+deletes the connection. Its projects stay in the org as historical results that Snyk no longer
+retests.
 
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 - Connect several registries to one org (Priority: P1)
+### User Story 1 - Connect several ECRs to one org (Priority: P1)
 
-An engineer whose org has the feature enabled connects registries from several regions and accounts
-to that one org. Each becomes a named connection with its own read proof, preview, and sync policy.
+An engineer whose org has the feature connects one ECR per environment to that one org, whatever
+their accounts and regions. Each becomes a named connection with its own read proof, preview, and
+sync policy.
 
-**Why this priority**: it is the feature's purpose: one org for all of a customer's registries.
+**Why this priority**: it is the feature: one org for all of a customer's registries, so reporting and
+issue management are not split across orgs.
 
-**Independent Test**: in a sandbox org with the feature enabled, connect two regions of one account
-and one region of a second account. The org then has three named connections, and each imports only
-the matching tags of its own registry.
+**Independent Test**: in a sandbox org with the feature, connect `prod` and `staging`, two ECRs in the
+same region of different accounts, and `dr`, a second region of the first account. The org then has
+three connections, and each imports only the matching tags of its own ECR.
 
 **Acceptance Scenarios**:
 
-1. **Given** an org with the feature and no ECR connection, **When** the engineer runs `apply` for a
-   registry, **Then** the tool creates a named connection and continues as in baseline Story 1: read
-   proof, preview, policy.
-2. **Given** an org with connection A, **When** `apply` runs for another registry as connection B,
-   **Then** B is created, and A's connection, policy, and projects are unchanged.
-3. **Given** connection A exists, **When** `apply` runs again for A with another policy, **Then** A is
-   reused and only A's policy is replaced.
-4. **Given** no connection name is given, **When** `plan` or `apply` runs, **Then** the tool uses the
-   default name derived from the registry's account and region, so a re-run reaches the same
-   connection.
+1. **Given** an org with the feature and no connection, **When** the engineer runs `apply` naming
+   `prod`, **Then** the tool creates `prod` and continues as in baseline Story 1: read proof, preview,
+   policy.
+2. **Given** an org with `prod`, **When** `apply` runs naming `staging` for another ECR, in any account
+   and any region, **Then** `staging` is created, and `prod`'s connection, policy, and projects are
+   unchanged.
+3. **Given** `prod` exists, **When** `apply` runs again for `prod` with another policy, **Then** `prod`
+   is reused and only its policy is replaced.
+4. **Given** an org with the feature, **When** `plan` or `apply` runs without a connection name,
+   **Then** nothing changes, and the tool lists the org's connections and asks for a name.
+5. **Given** an org without the feature, **When** a run names a connection, **Then** nothing changes,
+   and the tool says the org is in default mode.
 
 ---
 
-### User Story 2 - Grant access for several registries of one account (Priority: P1)
+### User Story 2 - Know which ECR an image came from (Priority: P1)
 
-The engineer maps several regions of one AWS account to the same org, each as its own connection.
-The account's role trusts the org once.
+An engineer looking at a vulnerable image in a shared org needs to know which ECR, and so which
+environment, it was picked up from, even when the same repository exists in several.
 
-**Why this priority**: without it, Story 1 works only one registry per account.
+**Why this priority**: environments overlap in repository names by design, and Snyk's own project page
+shows only that a project came from ECR, not which connection. Without this, a shared org makes
+triage and cleanup unsafe.
 
-**Independent Test**: map regions A and B of one account to org O with two connection names; the
-access change is accepted and the role trusts O exactly once.
+**Independent Test**: connect `prod` and `staging`, whose ECRs both hold `team-a/app:v1.4.0`. `status`
+shows two projects for that image, one under each connection.
 
 **Acceptance Scenarios**:
 
-1. **Given** a mapping with regions A and B both mapped to org O under distinct connection names,
-   **When** access is granted, **Then** the change is accepted and the role trusts O once.
-2. **Given** a mapping that lists one org under two regions without connection names, **When** access
-   is granted, **Then** it is rejected as in the baseline.
-3. **Given** org O already trusted by the account's role, **When** a region is added for O, **Then**
-   the role's trust does not change.
+1. **Given** the same repository and tag in two connected ECRs, **When** `status` runs, **Then** each
+   project appears under the connection that imported it.
+2. **Given** a run of `plan` or `apply`, **When** the read proof and the preview list repositories and
+   tags, **Then** every line names the connection.
+3. **Given** Snyk does not record which connection imported a project, **When** the tool reports it,
+   **Then** it says so rather than guessing from the repository name.
 
 ---
 
-### User Story 3 - Pause or remove one connection (Priority: P2)
+### User Story 3 - Pause or disconnect one connection (Priority: P2)
 
-The engineer pauses, or removes, one connection of an org that has several. The other connections
-keep working, and nothing they imported is touched.
+The engineer pauses or disconnects one connection of a shared org. The other connections keep
+working, and nothing they imported is touched. The disconnected connection's past scans stay as
+history unless the engineer asks to remove them.
 
-**Why this priority**: shared orgs make a mistaken teardown more expensive, because one org now holds
-the projects of many registries.
+**Why this priority**: in a shared org a mistaken teardown reaches more projects, so it must be scoped
+by connection.
 
-**Independent Test**: in an org with connections A and B, pause A, then remove A; B keeps its policy,
-its projects, and a passing read proof throughout.
+**Independent Test**: in an org with `prod` and `staging`, pause `staging`, then disconnect it. `prod`
+keeps its policy, its projects, and a passing read proof throughout, and `staging`'s projects remain
+as history.
 
 **Acceptance Scenarios**:
 
-1. **Given** an org with several connections, **When** teardown runs without a connection name,
-   **Then** nothing changes, and the tool lists the org's connections.
-2. **Given** connections A and B, **When** teardown for A is confirmed with no options, **Then** only
-   A's policy is removed.
-3. **Given** connections A and B whose registries both hold a repository `team-a/app`, **When**
-   teardown for A is confirmed with project removal under `team-a/`, **Then** no project imported
-   through B is removed (see FR-011).
-4. **Given** a request to remove connection A, **When** teardown is confirmed, **Then** A is handled
-   as FR-012 states, and B is unchanged.
+1. **Given** an org with the feature, **When** teardown runs without a connection name, **Then**
+   nothing changes, and the tool lists the org's connections.
+2. **Given** `prod` and `staging`, **When** teardown for `staging` is confirmed with no options,
+   **Then** only `staging`'s policy is removed (a pause).
+3. **Given** a request to disconnect `staging`, **When** teardown is confirmed, **Then** the policy is
+   removed and the `staging` connection is deleted; its projects stay as historical results, no longer
+   retested; `prod` is unchanged.
+4. **Given** a request to also remove `staging`'s projects, **When** teardown is confirmed, **Then**
+   only projects imported through `staging` are removed, optionally narrowed by a repository prefix,
+   even where `prod` has the same repositories.
+5. **Given** Snyk does not record which connection imported the projects, **When** project removal is
+   requested, **Then** the tool refuses it and changes nothing.
 
 ---
 
-### User Story 4 - See every connection of an org (Priority: P2)
+### User Story 4 - Grant access without regard to region (Priority: P2)
 
-The engineer sees, in one report, every ECR connection of the org and its state.
+The engineer grants each AWS account's access role trust for the orgs that read its ECRs. Regions
+play no part in that trust.
 
-**Why this priority**: with several connections, the first question is "which ones exist?"
+**Why this priority**: it keeps AWS changes rare. Connecting another ECR for an org an account
+already trusts needs nothing in AWS.
 
-**Independent Test**: `status` on an org with three connections lists all three.
+**Independent Test**: with the role of account 111111111111 trusting org O, connect a second ECR of
+that account (any region) to O. No AWS change is needed or made.
 
 **Acceptance Scenarios**:
 
-1. **Given** an org with several connections, **When** `status` runs without a name, **Then** it lists
-   every connection with its name, region, AWS account, and policy summary, and changes nothing.
+1. **Given** an account whose role already trusts org O, **When** another of its ECRs is connected to
+   O, **Then** the role's trust does not change.
+2. **Given** an org not yet trusted by an account, **When** it is added, **Then** the trust changes in
+   place, as in the baseline.
+3. **Given** an org in default mode, **When** access is granted with the baseline's region-to-org
+   mapping, **Then** it behaves exactly as the baseline specifies.
+
+---
+
+### User Story 5 - See every connection of an org (Priority: P3)
+
+The engineer sees, in one read-only report, every connection of the org and its state.
+
+**Why this priority**: useful once there are several, but nothing else depends on it.
+
+**Independent Test**: `status` on an org with three connections lists all three and changes nothing.
+
+**Acceptance Scenarios**:
+
+1. **Given** an org with the feature, **When** `status` runs without a name, **Then** it lists every
+   connection with its name, AWS account, region, and policy summary.
 2. **Given** a connection name, **When** `status` runs, **Then** it reports that connection as the
    baseline reports an org's single connection.
 
@@ -148,114 +215,119 @@ The engineer sees, in one report, every ECR connection of the org and its state.
 
 ### Edge Cases
 
-- **The feature is enabled but the org has only one connection**: it is still a named connection; a
-  run without a name reaches it only if the default name matches (FR-003).
-- **Two accounts, same region**: the default names differ because they include the account.
-- **The same image exists in several accounts**: Snyk shows one project per connection; reducing those
-  duplicates is out of scope.
-- **A connection name that does not exist** given to `status` or `teardown`: the tool changes nothing
-  and lists the org's connections.
-- **The feature is turned off for an org that has several connections**: the behavior depends on
-  what Snyk then does with the extra connections; planning decides it ([research](research.md), item 6).
+- **A name that does not exist**, given to `status` or `teardown`: nothing changes, and the tool lists
+  the org's connections.
+- **A name already used in the org**, given to `apply` for a different ECR: `apply` treats it as the
+  existing connection and changes its role or region only when asked, as for any existing connection.
+- **Exactly one connection in profiles mode**: it still has a name, and changes still require it.
+- **Two connections to the same ECR** under different names: allowed by the tool, but the same images
+  are then imported twice; the tool warns.
+- **Snyk turns the feature off for an org with several connections**: depends on what Snyk does with
+  the extra connections; decided in planning ([research](research.md), item 6).
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
-**Compatibility**
+**Modes**
 
-- **FR-001**: On orgs without the feature, every behavior of baseline 001 MUST stay unchanged: the same
-  inputs, outputs, and exit codes.
+- **FR-001**: For an org without the feature (default mode), every behavior of baseline 001 MUST stay
+  unchanged: the same inputs, outputs, and exit codes.
+- **FR-002**: Profiles mode MUST apply exactly when Snyk has enabled the feature for the org. The tool
+  MUST determine the org's mode before it changes anything, and MUST NOT apply default-mode behavior
+  to an org in profiles mode.
+- **FR-003**: A connection name given for an org in default mode MUST be refused before any change.
 
-**Connections**
+**Connections (profiles mode)**
 
-- **FR-002**: On an org with the feature, each run of `plan` or `apply` MUST act on exactly one named
-  connection, whose name is unique within the org.
-- **FR-003**: When no name is given to `plan` or `apply`, the connection name MUST default to one built
-  from the registry's AWS account and region (for example `ecr-111111111111-ap-southeast-2`). The
-  engineer MAY give another name.
-- **FR-004**: `apply` MUST create the named connection when it is missing, reuse it unchanged when it
+- **FR-004**: An org MAY hold any number of connections, to ECRs in any AWS accounts and any regions.
+  No connection's account or region MAY constrain another's.
+- **FR-005**: Every operation except `status` MUST name exactly one connection. Names are chosen by the
+  engineer, are unique within the org, and have no default. Without a name, the tool MUST change
+  nothing and list the org's connections.
+- **FR-006**: `apply` MUST create the named connection when it is missing, reuse it unchanged when it
   exists, and replace its stored role and region only when asked. It MUST NOT read or change any other
   connection's credentials, policy, or projects.
-- **FR-005**: The read proof, the sync preview, and setting or replacing the policy MUST apply to the
+- **FR-007**: The read proof, the sync preview, and setting or replacing the policy MUST apply to the
   named connection only.
-- **FR-006**: When a read proof fails after its retries, the explanation MUST name the connection as
+- **FR-008**: When a read proof fails after its retries, the explanation MUST name the connection as
   well as the org.
-- **FR-007**: Every output line about a connection MUST identify it by name, so logs from runs on
-  different connections can be told apart.
 
-**Status**
+**Provenance (profiles mode)**
 
-- **FR-008**: `status` without a name MUST list every ECR connection of the org with its name, region,
-  AWS account, and policy summary. With a name, it MUST report that connection as baseline FR-024
-  reports an org's connection.
+- **FR-009**: Every line the tool prints about a repository, an image, or a project MUST name the
+  connection it belongs to.
+- **FR-010**: `status` MUST list every connection (name, AWS account, region, policy summary) and the
+  projects imported through each. The same repository imported through two connections MUST appear
+  under each of them.
+- **FR-011**: The tool MUST take a project's connection from Snyk's own record of which connection
+  imported it, never from repository names. Where Snyk provides no such record, the tool MUST say so
+  and MUST NOT guess.
 
-**Teardown**
+**Teardown (profiles mode)**
 
-- **FR-009**: On an org with more than one connection, `teardown` MUST require a connection name, and
-  without one MUST change nothing and list the org's connections.
-- **FR-010**: `teardown` MUST act only on the named connection: its policy, its credentials or the
-  connection itself, and projects imported through it.
-- **FR-011**: Removing projects MUST NOT remove a project imported through another connection, even
-  when repository names are the same across accounts. When the tool cannot tell which connection
-  imported a project, it MUST [NEEDS CLARIFICATION: refuse to remove projects in that org, remove
-  them by prefix only when no other connection's registry has a repository under that prefix, or
-  remove them by prefix with a warning?]
-- **FR-012**: When asked to remove a named connection, `teardown` MUST [NEEDS CLARIFICATION: delete the
-  connection entirely, remove only its credentials as the baseline does, or delete it entirely only
-  when its projects were removed in the same run?]
+- **FR-012**: `teardown` MUST act only on the named connection.
+- **FR-013**: Removing projects MUST select the projects imported through the named connection; a
+  repository prefix MAY narrow that selection. Where Snyk does not record which connection imported
+  them, removal MUST be refused with nothing changed.
+- **FR-014**: Disconnecting a named connection MUST delete the connection. Its projects MUST stay as
+  historical results, no longer retested, unless their removal was requested in the same run.
+- **FR-015**: A confirmed teardown MUST remove the connection's policy first, then the requested
+  projects, then, when asked, the connection.
 
 **Access**
 
-- **FR-013**: An account's access role MUST trust each org once, however many of the account's
-  registries connect to that org.
-- **FR-014**: The account's mapping MUST accept one org under several regions only when each of those
-  entries names a distinct connection. Without connection names, it MUST reject one org under two
-  regions, as baseline FR-008 does.
-- **FR-015**: Connecting another registry of an account to an org the account's role already trusts
-  MUST NOT change the role's trust. Adding a new org MUST change it in place, as baseline FR-009
-  states.
+- **FR-016**: An account's access MUST be stated as the set of orgs that read its ECRs, independent of
+  regions. Connecting another ECR for an org the account already trusts MUST NOT change anything in
+  AWS; adding an org MUST change the trust in place.
+- **FR-017**: For orgs in default mode, the baseline's region-to-org mapping and its validations
+  (baseline FR-008) MUST keep working unchanged.
 
 ### Key Entities
 
 Changes to the baseline's entities:
 
-- **Snyk org**: holds one or more ECR connections when Snyk has enabled the feature for it; otherwise
-  at most one, as before.
-- **ECR connection**: gains a **name**, unique within the org. It stores one role and one region, as
-  before, and may belong to an org shared with registries of other accounts.
-- **Region-to-org mapping entry**: may carry a **connection name**. Several entries of one account may
-  name the same org only with distinct connection names.
-- **Project**: imported through one connection. Whether Snyk records which one is a planning
-  question (FR-011).
+- **Mode**: per org, decided by Snyk's feature setting: default (at most one ECR connection) or
+  profiles (any number of named connections).
+- **Named connection** (profiles mode): a link from an org to one ECR, with a name unique in the org,
+  and the role and region it stores. Deleting it disconnects the ECR.
+- **Project**: in profiles mode, imported through exactly one named connection, which the tool reports
+  from Snyk's record.
+- **Account access**: the set of orgs an account's role trusts, independent of regions and of how many
+  connections each org has to the account.
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
-- **SC-001**: An engineer connects at least three registries, across at least two AWS accounts, to one
-  org with one `apply` each, and each shows as its own named connection with its own policy.
+- **SC-001**: One org holds at least three connections, including two in the same region of different
+  accounts and two in different regions of the same account, each added with one `apply`.
 - **SC-002**: Acting on one connection changes zero items belonging to the org's other connections.
-- **SC-003**: On orgs without the feature, every acceptance scenario of baseline 001 still passes
-  unchanged.
-- **SC-004**: One `status` run shows every connection of the org.
-- **SC-005**: Connecting another region of an account to an org the account already trusts needs no
-  change in AWS.
-- **SC-006**: A teardown that names no connection, on an org with several, changes nothing in every
-  case.
+- **SC-003**: For every project in a profiles-mode org, the tool names the connection it came from,
+  and attributes zero projects by repository name.
+- **SC-004**: For default-mode orgs, every acceptance scenario of baseline 001 still passes unchanged.
+- **SC-005**: Connecting another ECR for an org the account already trusts needs zero AWS changes.
+- **SC-006**: A change that names no connection on a profiles-mode org, or names one on a default-mode
+  org, changes nothing in every case.
 
 ## Assumptions
 
-- **Snyk enables the feature per customer.** It is a closed beta for ECR only, offered to Enterprise
+- **Snyk enables the feature per customer.** It is a closed beta, for ECR, offered to Enterprise
   customers; engineers cannot turn it on themselves.
-- **For orgs with the feature, connections are managed through Snyk's API.** Snyk's enablement
-  material says the UI's registry configuration is removed for these orgs, with UI support planned for
-  June 2026; whether it has shipped is unconfirmed. That makes a tool like this one the main way to
-  manage these connections.
-- **Each connection presents the org ID as the external ID**, as single connections do. To be
+- **Connections in profiles mode are managed through Snyk's API.** Snyk's enablement material says the
+  UI's registry configuration is removed for these orgs, with UI support planned for June 2026;
+  whether it has shipped is unconfirmed.
+- **Snyk keeps a record of which connection imported each project**, at least internally. Whether its
+  public API exposes it decides FR-011 and FR-013, and is the first question for planning
+  ([research](research.md), item 1).
+- **Inside Snyk's own UI**, showing a project's connection is Snyk's to do; customers have asked for
+  it. The tool makes provenance visible in its own output, and meaningful names make it readable
+  wherever Snyk shows a connection.
+- **Each connection presents the org ID as the external ID**, as a single connection does. To be
   confirmed in planning.
-- **Out of scope**: consolidating existing one-org-per-registry setups into a shared org (moving
-  projects between orgs), and reducing duplicate projects when one image exists in several accounts.
-- **Default names** follow FR-003. They are stable because the role ARN carries the account, and the
-  region is an input.
-- **Connection names** follow Snyk's limits for profile names, to be confirmed in planning.
+- **A deleted connection's projects remain and stop being retested.** This matches Snyk's design notes
+  and is to be verified live.
+- **Out of scope**: consolidating existing one-org-per-registry setups into a shared org, and reducing
+  duplicate projects when one image exists in several ECRs.
+- **Names** follow Snyk's limits for profile names, to be confirmed in planning; environment names
+  (`prod`, `staging`) are the expected style.
