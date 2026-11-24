@@ -158,7 +158,7 @@ def copy_image(dest: str, tags: list[str], password: str, send: Send = http_send
         location = urllib.parse.urljoin(ecr + "/", _header(start, "Location") or "")
         chunk, _, _ = _request(send, "PATCH", location, push, {
             "Content-Type": "application/octet-stream", "Content-Length": str(len(data)),
-            "Content-Range": f"0-{len(data) - 1}"}, data, expect=(202,))
+            "Content-Range": f"0-{len(data) - 1}"}, data, expect=(201, 202))  # ECR answers 201, the spec says 202
         location = urllib.parse.urljoin(ecr + "/", _header(chunk, "Location") or location)
         joiner = "&" if "?" in location else "?"
         _request(send, "PUT", f"{location}{joiner}{urllib.parse.urlencode({'digest': digest})}", push,

@@ -39,8 +39,9 @@ INDEX = json.dumps({"schemaVersion": 2, "mediaType": "application/vnd.oci.image.
 class FakeRegistries:
     """public.ecr.aws (source, with a CDN redirect for the layer) and one ECR registry (destination)."""
 
-    def __init__(self, config_present=True, ecr_status=None, hub_status=None):
+    def __init__(self, config_present=True, ecr_status=None, hub_status=None, patch_status=202):
         self.calls = []
+        self.patch_status = patch_status
         self.hub_status = hub_status
         self.config_present = config_present
         self.ecr_status = ecr_status
@@ -76,7 +77,7 @@ class FakeRegistries:
                 return 202, {"Location": "/v2/snyk-e2e/app/blobs/uploads/u1?_state=s1"}, b""
             if method == "PATCH" and "/blobs/uploads/u1" in path:
                 self.uploaded["u1"] = body
-                return 202, {"Location": f"{ECR}/v2/snyk-e2e/app/blobs/uploads/u1?_state=s2"}, b""
+                return self.patch_status, {"Location": f"{ECR}/v2/snyk-e2e/app/blobs/uploads/u1?_state=s2"}, b""
             if method == "PUT" and "/blobs/uploads/u1" in path:
                 return 201, {}, b""
             if method == "PUT" and "/manifests/" in path:
@@ -127,6 +128,12 @@ class PushImageTests(unittest.TestCase):
         self.assertIn("digest=sha256%3A" + hashlib.sha256(LAYER).hexdigest(), put)
         patch = next(h for m, u, h, _ in fake.calls if m == "PATCH")
         self.assertEqual(patch["Content-Range"], f"0-{len(LAYER) - 1}")
+
+    def test_ecr_answering_the_chunk_with_201_is_accepted(self):
+        # Seen live on 2026-11-24: ECR answers the PATCH with 201 Created, where the spec says 202.
+        fake = FakeRegistries(config_present=False, patch_status=201)
+        pi.copy_image(DEST, ["v1.0.0"], PASSWORD, send=fake)
+        self.assertEqual(set(fake.manifests), {"v1.0.0"})
 
     def test_credentials_never_follow_a_redirect_to_another_host(self):
         fake = FakeRegistries()
