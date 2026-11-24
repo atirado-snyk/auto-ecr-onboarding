@@ -47,6 +47,12 @@ it (Phase 0). Sources are Snyk-internal unless marked public.
 - **The name `this.is.a-test:1234567890/abc` drew no field error** in the form, so the UI does not
   restrict dots, hyphens, colons, or slashes before submitting. Whether Snyk's server accepts such a
   name is **unproven**: the request failed, possibly before the name was checked.
+- **The baseline's view of a flagged org with no profiles** (`status --all-origins` on `antonio-org`,
+  2026-11-24, read-only): `ECR integration: none`, no sync policy, no ECR projects, 60 projects of
+  other origins. That is exactly what it reports for a default-mode org with no connection, so the v1
+  listing alone cannot tell the modes apart, at least while the org has no profiles. The baseline's
+  `apply` would therefore attempt a v1 create on this org (the FR-016 risk); 002 must find the mode
+  elsewhere (question 3). Log: `examples/sandbox/.e2e/profiles-status-baseline.log` (gitignored).
 - **Next observations**: the failed request's response body, from the browser's developer tools,
   would name the failing check and show the API call's path, version, and body (questions 2 and 8).
   A create with a real, trusted role and the default name format, followed by a delete, would prove
