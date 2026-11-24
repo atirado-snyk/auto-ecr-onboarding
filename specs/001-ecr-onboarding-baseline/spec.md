@@ -4,7 +4,8 @@
 
 **Created**: 2026-11-24
 
-**Status**: Draft. Baseline of the delivered behavior at commit `f035a43`.
+**Status**: Draft. Baseline of the delivered behavior at commit `f035a43`, plus the convergence fixes
+T046 and T047 (2026-11-24).
 
 **Input**: User description: "Derive and elevate the specs of the existing tool so it is much easier
 to describe and change: a baseline spec with diagrams, testable requirements, and a record of what
@@ -408,15 +409,15 @@ Per Constitution Principle VII. Details per requirement are in
 
 | Level | Requirements | Evidence |
 |-------|--------------|----------|
-| Offline tests | Every requirement not listed in the rows below | `make check` at `f035a43`, re-run 2026-11-24: 86 unit tests, 5 `terraform test` runs, `fmt` and `validate` pass (Python 3.12, Terraform 1.17.2) |
-| Live only, no offline test | FR-005, FR-006, FR-007 (the role, its trust, its permissions, the principal input); FR-028 (the "not removed" report) | From-scratch end-to-end runs on the US tenant ([docs/TESTING.md](../../docs/TESTING.md)): every scenario on 2026-10-19, from the working tree later committed as `f035a43`; the steps of `e2e.sh single` (scenario 1 and the whole-account teardown), in order, on 2026-11-24 at `f035a43` itself; all checks passed |
+| Offline tests | Every requirement not listed in the rows below | `make check` on 2026-11-24 with the convergence fixes, on the owner's Mac: 88 unit tests, 5 `terraform test` runs, `fmt`, `validate`, and the e2e script's syntax check pass (earlier the same day at `f035a43`: 86 tests, Python 3.12, Terraform 1.17.2) |
+| Live only, no offline test | FR-005, FR-006, FR-007 (the role, its trust, its permissions, the principal input); FR-028 (the "not removed" report) | From-scratch end-to-end runs on the US tenant ([docs/TESTING.md](../../docs/TESTING.md)): every scenario on 2026-10-19, from the working tree later committed as `f035a43`; the steps of `e2e.sh single` (scenario 1 and the whole-account teardown), in order, on 2026-11-24 at `f035a43` itself, and again with the convergence fixes; all checks passed both times |
 | Live, partly | FR-009: the in-place plan was verified; applying it was not | The test identity lacked `iam:UpdateAssumeRolePolicy` |
 | Not verified live | FR-033 on the EU and AU tenants | Only the US tenant was tested |
-| Offline only, so far | FR-031's redirect refusal and FR-032's errors while a response is read (tasks T046, T047) | The unit tests pass, 88 of them, on Python 3.10 (2026-11-24); `make check` and the e2e on the fix are pending |
+| Offline, with a live regression run | FR-031's redirect refusal and FR-032's errors while a response is read (tasks T046, T047) | Unit tests, one of them against loopback servers, in `make check` (2026-11-24). The e2e passed with the fix the same day, so Snyk's API answered every call without a redirect and refusing them breaks nothing; a redirect itself cannot be produced live |
 | Observed live, outside the e2e | FR-016: the single-connection limitation | A test org with the beta enabled, November 2026 (`docs/USAGE.md`, Constraints 1) |
 | Code review only | FR-001; FR-030 (missing token); FR-034's exit code 1 | No test exercises these paths |
 
 Live coverage by story, on the US tenant with a personal token and with an org service account:
 Stories 1 and 4 in full; Story 2 except applying the trust update; Story 3 except retiring one region
-of several, which needs that same update. Re-run on 2026-11-24 at `f035a43` with the owner's token:
-Story 1, Story 4, and Story 3's removal of everything.
+of several, which needs that same update. Re-run twice on 2026-11-24 with the owner's token, at `f035a43` and with the convergence
+fixes: Story 1, Story 4, and Story 3's removal of everything.

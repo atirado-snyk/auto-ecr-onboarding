@@ -137,7 +137,7 @@ Set it up with a service account, not a personal token (see [Running it over tim
 - `us-east-2` must be enabled for STS. Registry sync is generally available.
 
 ## Status
-86 unit tests (fake Snyk API; request shapes from the published v1 OpenAPI spec and REST spec
+88 unit tests (fake Snyk API; request shapes from the published v1 OpenAPI spec and REST spec
 `2026-03-25`) and 5 `terraform test` runs of the example's inputs (AWS provider mocked). **Verified live end
 to end** on the US tenant with a PAT, by the from-scratch harness (docs/TESTING.md), for one region:
 connectivity with the UI-prescribed principal, the connection test and its propagation retry, Regex sync
@@ -148,8 +148,8 @@ teardown passed; in scenario 2 the plan was exactly the in-place trust update an
 trust failed with the expected hint, but applying the update was refused by the test identity's IAM
 permissions (`iam:UpdateAssumeRolePolicy`, see [Permissions](docs/USAGE.md#permissions)), so that apply and the
 one-region teardown are not yet verified live. On 2026-11-24, scenario 1 and the whole-account teardown
-passed again from scratch against the committed code. OAuth 2.0 service accounts (bearer tokens) are not
-supported yet.
+passed again from scratch, before and after the fix that stops the token from following redirects.
+OAuth 2.0 service accounts (bearer tokens) are not supported yet.
 
 ## License
 MIT. See [LICENSE](LICENSE).

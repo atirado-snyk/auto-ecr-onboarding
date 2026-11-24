@@ -12,11 +12,11 @@ throwaway infrastructure. Usage for real registries is in [README.md](../../READ
 make check
 ```
 
-**Expected** (last run 2026-11-24 on `f035a43`, in under a minute):
+**Expected** (last run 2026-11-24 with the convergence fixes T046 and T047, in under a minute):
 
 | Part | Output to look for |
 |------|--------------------|
-| `make test` | `Ran 86 tests` … `OK` |
+| `make test` | `Ran 88 tests` … `OK` |
 | `make tf-validate` | no `fmt` diff; `Success! The configuration is valid.`; `bash -n` silent |
 | `make tf-test` | `5 passed, 0 failed.` |
 
