@@ -201,6 +201,7 @@ tests/test_onboard_ecr.py           # FakeClient routes for calls 13 to 17; prof
                                     #   including the Principle I delete scope for that mode
 examples/main.tf                    # snyk_profile_orgs, the trusted set, the trusted_org_ids output
 examples/snyk_orgs.tftest.hcl       # New runs for the profile-orgs input
+examples/sandbox/main.tf            # The e2e's role root: the same two inputs as examples/main.tf
 examples/sandbox/e2e.sh             # New step: profiles, with its preflight and the closed-beta call count;
                                     #   the image copy without Docker where Docker is not running
 examples/sandbox/push_image.py      # New: copies the test image into ECR over the registry API (stdlib)

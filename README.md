@@ -22,6 +22,10 @@ connects Snyk** (one run per registry). Snyk allows one ECR integration per Snyk
 every region of every account, has its own Snyk org; the orgs of one account share its role, which trusts each
 of their IDs. You choose the registry each time you run the script.
 
+The exception is an org where Snyk has turned on its multiple profiles feature (a closed beta): it holds any
+number of named ECR connections, one per registry, and the script manages them one at a time. The script
+detects the feature on every run; see [docs/USAGE.md](docs/USAGE.md#orgs-with-several-ecr-connections-profiles-mode).
+
 ## Scenarios
 
 Each scenario starts from a Snyk org (with Snyk Container) and an ECR registry that already exist. Export
