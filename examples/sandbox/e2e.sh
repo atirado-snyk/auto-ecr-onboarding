@@ -792,7 +792,10 @@ profiles_down() {
     while IFS= read -r name; do
       case "${name}" in
         "${keep}" | "${LABEL_B} "*)
-          pon p_down_del.log teardown --connection "${name}" --delete-connection --yes || fail "could not delete ${name}"
+          # Projects first, through the connection's provenance, then the connection: Snyk orphans a deleted
+          # connection's projects (live check L8), and nothing could attribute or remove them afterwards.
+          pon p_down_del.log teardown --connection "${name}" --delete-projects --delete-connection --yes ||
+            fail "could not delete ${name}"
           ;;
         *) echo "  keeping ${name}: not made by this step" ;;
       esac
