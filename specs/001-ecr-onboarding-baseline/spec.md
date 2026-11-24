@@ -211,8 +211,8 @@ projects imported so far, without changing anything.
 
 - **The org already holds an ECR connection**: it is reused unchanged. Its stored role and region are
   replaced only when the engineer asks; `plan` only reports that it would.
-- **The org is enrolled in Snyk's closed beta that allows several ECR connections per org**: see
-  FR-016.
+- **The org is enrolled in Snyk's closed beta that allows several ECR connections per org**:
+  unsupported in this baseline (FR-016); feature 002 adds support.
 - **The read proof fails on a reused connection**: it is not retried, and the message suggests that
   the connection may have been disconnected and how to update its credentials.
 - **The policy matches nothing, or imports only images pushed later (ImportAllNew)**: the preview can
@@ -278,10 +278,11 @@ projects imported so far, without changing anything.
   region, a disabled STS region) and the recovery: `apply` again, asking to update the credentials.
 - **FR-015**: `apply` MUST support connect-only: the connection and the read proof, with no sync
   policy.
-- **FR-016**: When the org holds more than one ECR connection (Snyk's closed multi-connection beta),
-  the tool MUST [NEEDS CLARIFICATION: refuse to run against that org, or keep today's behavior of
-  acting on the one connection Snyk's listing names, with the documented warning not to run it
-  there?]
+- **FR-016**: The tool supports orgs with at most one ECR connection. On an org with Snyk's
+  multi-connection feature enabled, it sees only the one connection Snyk's integration listing names
+  and acts on that one, so it MUST NOT be used there, and the docs say so. Decided on 2026-11-24:
+  support for such orgs is feature `002-multi-ecr-connections`, which replaces this requirement once
+  delivered.
 
 **Sync policy**
 
@@ -408,8 +409,8 @@ Per Constitution Principle VII. Details per requirement are in
 | Live only, no offline test | FR-005, FR-006, FR-007 (the role, its trust, its permissions, the principal input); FR-028 (the "not removed" report) | From-scratch end-to-end runs on the US tenant, last on 2026-10-19 ([docs/TESTING.md](../../docs/TESTING.md)) |
 | Live, partly | FR-009: the in-place plan was verified; applying it was not | The test identity lacked `iam:UpdateAssumeRolePolicy` |
 | Not verified live | FR-033 on the EU and AU tenants | Only the US tenant was tested |
+| Observed live, outside the e2e | FR-016: the single-connection limitation | A test org with the beta enabled, November 2026 (`docs/USAGE.md`, Constraints 1) |
 | Code review only | FR-001; FR-030 (missing token); FR-034's exit code 1 | No test exercises these paths |
-| No defined behavior | FR-016 | Clarification pending |
 
 Live coverage by story, on the US tenant with a personal token and with an org service account:
 Stories 1 and 4 in full; Story 2 except applying the trust update; Story 3 except retiring one region

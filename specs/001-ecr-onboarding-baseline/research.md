@@ -143,7 +143,9 @@ Snyk changes any of these, the named part of the tool breaks first.
 - **O4. Terraform version for the offline tests.** The module requires 1.5 or later, and
   `docs/USAGE.md` lists 1.5 as the prerequisite, but `make tf-test` uses `mock_provider`, which
   `terraform test` gained in 1.7. Running needs 1.5; checking needs 1.7.
-- **O5. Orgs in Snyk's multi-integration beta.** Spec FR-016, the one open clarification.
+- **O5. Orgs in Snyk's multi-integration beta.** Decided on 2026-11-24 by the owner: support them.
+  Specified as feature `002-multi-ecr-connections`. It redefines the "one registry per Snyk org"
+  invariant, so it needs a constitution amendment before its plan.
 - **O6. Not verified live.** Applying the in-place trust update (adding or retiring a region): the test
   identity lacked `iam:UpdateAssumeRolePolicy`. The EU and AU tenants: only the US tenant was tested.
 - **O7. Paths with no offline test.** The missing-token exit (FR-030), the mapping of errors to exit

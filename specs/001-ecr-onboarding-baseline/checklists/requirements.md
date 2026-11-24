@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain
+- [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -31,8 +31,9 @@
 
 ## Notes
 
-- **Open**: FR-016 carries the one [NEEDS CLARIFICATION] marker (orgs in Snyk's closed
-  multi-connection beta). It waits for the owner's answer; the plan records today's behavior.
+- **Resolved 2026-11-24**: FR-016 (orgs in Snyk's closed multi-connection beta). The owner chose to
+  support them. The baseline records today's limitation, and the support is specified as feature
+  `002-multi-ecr-connections`, so this spec keeps describing the delivered code.
 - **Implementation details**: the spec names no language, framework, or Snyk API. It does name
   AWS and Snyk concepts (registry, org, role trust, STS region, Snyk's policy types), which are the
   problem domain, and HTTPS and `.json`, which users see directly (where the token goes, the policy
