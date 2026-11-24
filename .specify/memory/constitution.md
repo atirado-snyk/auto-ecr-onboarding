@@ -98,8 +98,10 @@ constitution amendment.
   only with its org ID as `sts:ExternalId`, and the role grants read-only ECR actions.
 - **API split by mode.** In default mode, the v1 API (deprecated by Snyk) is used only for listing,
   creating and updating the ECR integration and deleting its credentials. In profiles mode,
-  connections are managed only through Snyk's REST Integrations API. Everything else uses the REST API
-  in both modes.
+  connections are managed only through Snyk's Integrations API, on the tier Snyk documents for it:
+  its closed-beta tier until Snyk publishes the API. Every run, in either mode, first asks that API
+  for the org's mode, which is its only use in default mode. Everything else uses the REST API in
+  both modes.
 
 ## Development Workflow and Quality Gates
 
@@ -126,4 +128,4 @@ is used. Where they conflict, this document wins until it is amended.
 - **Compliance**: every `plan.md` carries a Constitution Check against the current version. A
   violation MUST be justified in that plan's Complexity Tracking table or the plan does not proceed.
 
-**Version**: 2.0.0 | **Ratified**: 2026-11-24 | **Last Amended**: 2026-11-24
+**Version**: 3.0.0 | **Ratified**: 2026-11-24 | **Last Amended**: 2026-11-24

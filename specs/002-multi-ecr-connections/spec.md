@@ -22,7 +22,8 @@ ECR URI. As long as we're using the API to onboard, Snyk UI takes care of itself
 > FR-027, and FR-028.
 >
 > **Constitution impact.** It changes Principle I (what may be deleted) and the product invariants on
-> connections per org, role trust, and the API split: constitution v2.0.0.
+> connections per org, role trust, and the API split: constitution v2.0.0, then v3.0.0 for the
+> address the Integrations API is on (Snyk's closed-beta tier) and the mode check in both modes.
 
 ## Overview
 

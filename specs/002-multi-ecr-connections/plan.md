@@ -71,7 +71,8 @@ address, version, and mode signal with a token, passed on 2026-11-24. None block
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.* Checked against constitution
-v2.0.0.
+v3.0.0 (proposed in this branch; v2.0.0 named the API split's API as "REST", which the closed-beta
+address and the mode check in default mode did not meet: `/speckit-analyze` finding C1).
 
 | Principle | Gate | Result | Evidence |
 |-----------|------|--------|----------|
@@ -87,7 +88,7 @@ v2.0.0.
 | Invariant: provenance from Snyk | Never from repository names | Pass | [research R5](research.md#r5-provenance-fr-009-to-fr-011-fr-013) |
 | Invariant: one role per account | Trust independent of regions | Pass | The module is unchanged; [research R8](research.md#r8-account-access-without-regions-fr-016-fr-017-question-7) |
 | Invariant: least privilege | Unchanged | Pass | No change to the role's permissions |
-| Invariant: API split by mode | v1 only in default mode; connections only through the integrations API in profiles mode; REST for the rest | Pass | [contracts/snyk-api.md](contracts/snyk-api.md#changed-calls) |
+| Invariant: API split by mode | v1 only in default mode; connections only through the Integrations API, on its closed-beta tier, in profiles mode; the mode check in both modes; REST for the rest | Pass under v3.0.0 (pending the owner's approval of the amendment) | [contracts/snyk-api.md](contracts/snyk-api.md#changed-calls) |
 
 **Gate**: passes, with one violation justified below and approved by the owner on 2026-11-24.
 
