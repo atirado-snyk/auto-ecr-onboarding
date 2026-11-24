@@ -3,9 +3,12 @@
 This tool connects **one** Amazon ECR registry (one AWS account in one AWS region) to **one** Snyk
 organization so Snyk can scan it, and sets up Snyk's automatic image sync for it.
 
-> **Mapping is strictly one-to-one.** One Snyk org holds one ECR integration, which points at
-> one registry (account + region). To onboard N registries, use N Snyk orgs and run the
-> steps below N times. See [Constraints](#constraints).
+> **One registry per org, unless Snyk has turned on profiles for it.** By default one Snyk org holds
+> one ECR integration, which points at one registry (account + region): to onboard N registries, use
+> N Snyk orgs and run the steps below N times. An org where Snyk has turned on its multiple profiles
+> feature holds any number of named ECR connections instead; the tool detects that on every run. See
+> [Orgs with several ECR connections](#orgs-with-several-ecr-connections-profiles-mode) and
+> [Constraints](#constraints).
 
 ## Scope
 
@@ -197,7 +200,8 @@ every project in the org with its origin.
 | `--schedule-frequency-hours`, `--delete-images`, `--policy-name` | Snyk's policy settings (step 4). |
 | `--no-sync` | Connectivity only, no sync policy. |
 | `--max-images N`, `--force` | This script's safeguard on what one apply may import (default 1000). |
-| `--update-credentials` | Point an existing integration at this role/region. |
+| `--update-credentials` | Point an existing integration at this role/region (profiles mode: the named connection, renamed to the new registry address). |
+| `--connection VALUE`, `--exact-name`, `--delete-connection` | Profiles mode only: which connection, how a new one is named, and disconnecting it ([below](#orgs-with-several-ecr-connections-profiles-mode)). |
 | `--connect-retries`, `--connect-delay` | Propagation retries (default 10 × 15s). |
 | `--api-base`, `--api-version` | Snyk tenant host (or `SNYK_API_BASE`) and REST version. |
 
@@ -300,6 +304,69 @@ change. Do not also set a `snyk_orgs` workspace variable or variable set: those 
 `*.auto.tfvars` files, so the list must live in one place only. The Snyk principal can be a workspace
 variable instead of a line in the file. The script runs outside Terraform Enterprise (in CI or on a
 workstation), with the role ARN from the workspace outputs or built as `arn:aws:iam::<account-id>:role/<role-name>`.
+
+## Orgs with several ECR connections (profiles mode)
+
+Snyk runs a closed beta, for Enterprise customers, that lets one org hold several ECR integrations, which
+Snyk calls *profiles*: one per registry, in any accounts and regions. Snyk turns it on per org, at the
+request of your account team, with the IDs of the orgs. The tool detects it on every run, before it
+changes anything, and prints `Mode: profiles (…)` first; on other orgs everything above applies as it is.
+
+**Names.** Every connection has a name, unique in the org. A connection the tool creates is named after
+its registry's address, with your label, if any, in front:
+
+| Run | Name of the new connection |
+|---|---|
+| no `--connection` | `111111111111.dkr.ecr.ap-southeast-2.amazonaws.com` |
+| `--connection prod` | `prod 111111111111.dkr.ecr.ap-southeast-2.amazonaws.com` |
+| `--connection "Payments prod" --exact-name` | `Payments prod` |
+
+Snyk's API does not return a connection's region or role, so the name is how the tool knows which
+registry a connection reads. A name that carries no address (`--exact-name`, a name given in Snyk's UI,
+or `Default profile`, the connection an org had before Snyk turned the feature on) still works when you
+name it, with a warning that its registry cannot be checked; `status` then points to where Snyk's UI shows
+its region and role (Organization settings → Integrations → Amazon ECR → Profile Management).
+
+**Which connection a run acts on.** `--connection` takes a full name or a label. Without it, `plan` and
+`apply` use the connection whose name carries the run's registry, and create one only when none does and
+no connection with an unchecked registry exists. Every line about a repository, an image, or a project
+starts with `[<connection>]`, and `status` lists each project under the connection Snyk says imported it.
+
+```bash
+# Connect two registries of one account, and one of another account, to one org
+uv run scripts/onboard_ecr.py apply --org-id <org> --region ap-southeast-2 --role-arn <role-in-A> \
+  --connection prod --import-policy Regex --tag '^v[0-9]+\.[0-9]+\.[0-9]+$'
+uv run scripts/onboard_ecr.py apply --org-id <org> --region us-east-1 --role-arn <role-in-A> \
+  --connection dr --import-policy Regex --tag '^v[0-9]+\.[0-9]+\.[0-9]+$'
+uv run scripts/onboard_ecr.py apply --org-id <org> --region ap-southeast-2 --role-arn <role-in-B> \
+  --connection staging --import-policy ImportAllNew
+uv run scripts/onboard_ecr.py status --org-id <org>
+```
+
+**Access.** List such orgs in `snyk_profile_orgs` in `examples/main.tf`, with no region: the role trusts
+each org once, and connecting another of the account's registries to a listed org changes nothing in AWS.
+
+**Changing and removing a connection.**
+- Naming a connection with another account or region than its name carries is refused; add
+  `--update-credentials` to repoint it, and the tool renames it to the new address, keeping your label.
+- `teardown` needs `--connection`. Without options it pauses that connection (deletes its policy);
+  `--delete-projects` removes the projects imported through it, optionally narrowed by `--repo-prefix`;
+  `--delete-connection` deletes the connection, and Snyk then deletes its projects. A dry run first, as
+  always; `--yes` executes. `--delete-credentials` is for default mode only.
+- `Default profile` cannot be deleted through Snyk's API; remove it in Snyk's UI, or rename it there to its
+  registry address so the tool recognizes it.
+
+**Limits of the closed beta.**
+- Snyk documents its Integrations API only to beta customers, on its closed-beta tier, version
+  `2024-10-15`, which the tool pins. Snyk may withdraw the tier or promote it to its public API; moving
+  to the public API will be a planned change to this tool.
+- Each token may make 1 closed-beta call a second, 10 a minute, and 100 an hour, across every
+  closed-beta API, and every run of the tool makes at least one (its mode check, in either mode). The
+  tool waits as Snyk's rate-limit headers say, stops before any change when the wait would exceed a
+  minute, and reports its calls (`Closed-beta calls: N` on stderr).
+- Profiles accept only roles in AWS's standard partition, so registries in AWS China and GovCloud can
+  be connected only to an org in default mode.
+- Brokered connections are not supported.
 
 ## Running it over time
 
@@ -414,20 +481,21 @@ that person's permissions, so use one only for testing.
 
 ## Constraints
 
-1. **One registry per Snyk org.** An org's ECR integration has a single region and role. Two
+1. **One registry per Snyk org, by default.** An org's ECR integration has a single region and role. Two
    accounts, or two regions of one account, need two orgs (see
-   [Another region in the same account](#another-region-in-the-same-account)).
-   Snyk has a closed beta that lets one org hold several ECR integrations ("profiles"). Do not run this
-   tool against an org that has it enabled: the tool finds the org's ECR integration through the v1 list,
-   which then names only one of them, so `status`, `apply` and `teardown` can act on the wrong
-   integration (verified in a test org, November 2026).
+   [Another region in the same account](#another-region-in-the-same-account)), unless Snyk has turned
+   on its multiple profiles feature for the org: then one org holds several connections, and the tool
+   manages them one at a time (see
+   [Orgs with several ECR connections](#orgs-with-several-ecr-connections-profiles-mode)).
 2. **One-to-one by design.** The tool maps one registry to one org; it does not loop over
    accounts or regions. Drive it with one module call (one role) per AWS account, listing that account's
    orgs, and one script run per registry, for example from CI.
 3. **Snyk principal is tenant-specific** and Snyk's to change. It is a required input, taken from your
    tenant's Snyk UI; the connection test proves it.
-4. **v1 API dependency.** Integration create/list/update/credential delete exist only in the v1 API,
-   which Snyk marks deprecated; there is no REST equivalent. Sync policy and projects are REST.
+4. **v1 API dependency.** In default mode, integration create/list/update/credential delete exist only in
+   the v1 API, which Snyk marks deprecated; there is no REST equivalent. In profiles mode, connections go
+   through Snyk's closed-beta Integrations API instead, and every run's mode check calls it. Sync policy,
+   projects, and targets are REST.
 5. **Import paths.** The sync imports matching images on its schedule (at least 2 hours apart); with
    `--no-sync`, images are imported from the Snyk UI. Snyk's docs give two limits for one run (10,000 images in one place, 1,000 in another); either way
    the remainder is imported in later runs.

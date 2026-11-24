@@ -15,3 +15,7 @@ snyk_orgs = {
   # Added later for a second region of the same account:
   # "us-east-1" = "<snyk-org-id-b>"
 }
+
+# Orgs where Snyk has turned on its multiple profiles feature (profiles mode) hold several ECR connections,
+# to any region of this account, so they are listed without a region. Leave this out if you have none.
+# snyk_profile_orgs = ["<snyk-org-id-with-profiles>"]

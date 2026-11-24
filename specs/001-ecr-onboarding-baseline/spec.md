@@ -213,7 +213,8 @@ projects imported so far, without changing anything.
 - **The org already holds an ECR connection**: it is reused unchanged. Its stored role and region are
   replaced only when the engineer asks; `plan` only reports that it would.
 - **The org is enrolled in Snyk's closed beta that allows several ECR connections per org**:
-  unsupported in this baseline (FR-016); feature 002 adds support.
+  unsupported in this baseline (FR-016); feature
+  [002](../002-multi-ecr-connections/spec.md) adds support, as profiles mode.
 - **The read proof fails on a reused connection**: it is not retried, and the message suggests that
   the connection may have been disconnected and how to update its credentials.
 - **The policy matches nothing, or imports only images pushed later (ImportAllNew)**: the preview can
@@ -285,7 +286,9 @@ projects imported so far, without changing anything.
   multi-connection feature enabled, it sees only the one connection Snyk's integration listing names
   and acts on that one, so it MUST NOT be used there, and the docs say so. Decided on 2026-11-24:
   support for such orgs is feature `002-multi-ecr-connections`, which replaces this requirement once
-  delivered.
+  delivered. **Superseded for such orgs** by [002](../002-multi-ecr-connections/spec.md) (profiles
+  mode): the tool now detects the feature on every run and manages each connection by name; this
+  requirement still describes default mode.
 
 **Sync policy**
 
@@ -414,7 +417,7 @@ Per Constitution Principle VII. Details per requirement are in
 | Live, partly | FR-009: the in-place plan was verified; applying it was not | The test identity lacked `iam:UpdateAssumeRolePolicy` |
 | Not verified live | FR-033 on the EU and AU tenants | Only the US tenant was tested |
 | Offline, with a live regression run | FR-031's redirect refusal and FR-032's errors while a response is read (tasks T046, T047) | Unit tests, one of them against loopback servers, in `make check` (2026-11-24). The e2e passed with the fix the same day, so Snyk's API answered every call without a redirect and refusing them breaks nothing; a redirect itself cannot be produced live |
-| Observed live, outside the e2e | FR-016: the single-connection limitation | A test org with the beta enabled, November 2026 (`docs/USAGE.md`, Constraints 1) |
+| Observed live, outside the e2e | FR-016: the single-connection limitation | A test org with the beta enabled, November 2026. Profiles-mode orgs are now feature [002](../002-multi-ecr-connections/spec.md)'s, and its Verification Status covers them |
 | Code review only | FR-001; FR-030 (missing token); FR-034's exit code 1 | No test exercises these paths |
 
 Live coverage by story, on the US tenant with a personal token and with an org service account:
