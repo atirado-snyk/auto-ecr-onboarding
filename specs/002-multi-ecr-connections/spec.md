@@ -331,9 +331,10 @@ Changes to the baseline's entities:
 - **The tool manages connections in profiles mode through Snyk's API.** Snyk's UI also offers "Create
   new ECR profile" with the same fields (name, region, role ARN), observed on 2026-11-24, so
   connections made either way are the same kind of object.
-- **Snyk keeps a record of which connection imported each project**, at least internally. Whether its
-  public API exposes it decides FR-011 and FR-013, and is the first question for planning
-  ([research](research.md), item 1).
+- **Snyk records which connection imported each project, and exposes it**: each project belongs to a
+  target, and the target names its connection. Verified live on 2026-11-24
+  ([research](research.md), item 1). The refusal paths in FR-011 and FR-013 remain as a safeguard for
+  any project without that record.
 - **Snyk's UI is out of scope** (owner, 2026-11-24). The tool onboards through Snyk's API, and how
   Snyk's UI then presents connections and projects is Snyk's concern. The tool shows provenance in its
   own output.

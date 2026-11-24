@@ -109,6 +109,25 @@ What it raises:
   must filter on `integration_type: "ecr"`. The list carries no credentials, and `links` was empty for
   seven integrations.
 
+### Provenance through the public REST API (2026-11-24)
+
+The owner pushed `alpine:3.18` as `snyk-profile-test/app:v1.0.0` to `us-east-1` and imported it
+through the profile in the UI. The project page shows only "Source: ECR". The public REST API (version
+`2025-09-17`, token authentication) links the project to the profile:
+
+- `GET /rest/orgs/{org}/projects?origins=ecr&expand=target`: project
+  `<project-id>`, named `snyk-profile-test/app:v1.0.0`, with
+  `relationships.target.data.id` `<target-id>`. The project itself carries no
+  integration ID.
+- `GET /rest/orgs/{org}/targets`: target `<target-id>` (`display_name` `snyk-profile-test/app`) has
+  `relationships.integration.data.id` `<profile-id>` (the profile) and
+  `integration_type` `ecr`. Every other target names its own integration the same way.
+
+**Question 1 is answered: yes.** A project's connection is project → target → integration, all in
+the published API, so FR-011 and FR-013 need no hidden API. Not yet seen: two profiles holding the same
+repository, which Registry ADR 0096 implies gives one target per profile; the Track 3 e2e should
+assert it.
+
 ### What the profile settings page's code says (from the HAR's JavaScript bundle)
 
 - **Deleting a profile deletes its projects.** The page's text: "This will permanently delete your
@@ -142,11 +161,9 @@ What it raises:
 
 ## What planning must find out
 
-1. **Whether Snyk's public API exposes which connection imported a project.** This decides FR-011 and
-   FR-013: without it, project removal is refused in profiles mode. Candidates: the project's target
-   (the ADR ties org targets to the integration's `orgSourcePublicId`), or a relationship or attribute
-   on the project itself. If neither is public, the fallback is a request to Snyk; the tool must not
-   guess.
+1. ~~Whether Snyk's public API exposes which connection imported a project.~~ Answered on 2026-11-24:
+   it does, through the project's target, whose `relationships.integration` names the profile (see
+   "Provenance through the public REST API").
 2. **The REST Integrations API's exact shape**: path prefix, API version and stability, request and
    response attributes for ECR (`profile_name`, region, role ARN), and required token permissions.
    The public API reference has no page for it (`docs.snyk.io/snyk-api/reference/integrations`
