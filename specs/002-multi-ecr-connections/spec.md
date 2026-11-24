@@ -417,7 +417,9 @@ Changes to the baseline's entities:
   associated with this profile"). Verified live through the API on 2026-11-24: the test project was
   gone seconds after the delete, although the UI describes the removal as scheduled. The tool follows
   the product (owner, 2026-11-24). Snyk's beta documentation says instead that such projects "become
-  orphaned"; the live test checks it again ([research](research.md), R14).
+  orphaned", and the live test of 2026-11-24 on the closed-beta address saw exactly that: the project
+  stayed, naming the deleted connection. FR-014 is therefore contradicted live, pending the owner's
+  decision ([research](research.md), R14).
 - **A connection made before the feature works as a profile, except for deletion.** Snyk's beta
   documentation says it is listed as "Default profile" and can be renamed and repointed, but only
   connections created as profiles can be deleted ([research](research.md), R6).
@@ -429,3 +431,15 @@ Changes to the baseline's entities:
   a label therefore uses the same characters, without spaces.
 - **The registry is in the role's account**, as Snyk's setup prescribes, so the default name follows
   from the role and the region the engineer already gives.
+
+## Verification Status
+
+Per Constitution Principle VII. Live means the US tenant, the owner's user token, Snyk's closed-beta
+address, and the sandbox account, on 2026-11-24 ([research](research.md), "Live profiles runs").
+
+| Level | Requirements | Evidence |
+|-------|--------------|----------|
+| Offline tests | Every requirement | `make check`: 168 unit tests (88 of the baseline unchanged), 10 `terraform test` runs, `fmt`, `validate`, and the e2e script's syntax check |
+| Live | FR-001 and FR-002 (the mode signal on orgs of each kind), FR-004, FR-005 (default names and labels), FR-006 (reuse; refusal for another registry), FR-007, FR-009, FR-016, SC-007, US1/AC1, AC2, AC4, AC7 | The `profiles` e2e step, up to its import check |
+| Contradicted live | FR-014: Snyk orphans a deleted connection's projects instead of deleting them | Live check L8; the owner decides the change ([research](research.md), R14) |
+| Not verified live | FR-010 and FR-011 with real projects (L4), US2, US3 beyond the refusals, SC-001 (one account only), SC-003, `--update-credentials` (L1, left out by the owner), service-account tokens (L5), the EU and AU tenants, and default mode end to end with the mode check (`./e2e.sh single`, SC-004) | See the open live checks in [research](research.md#live-checks-before-or-during-implementation) |

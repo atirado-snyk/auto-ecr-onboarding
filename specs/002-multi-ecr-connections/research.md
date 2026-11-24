@@ -265,6 +265,27 @@ A read-only probe, run by the owner with his token at version `2024-10-15` (live
   (`api-gateway.api-closed-beta`), not per org or per call. Each answer showed `Remaining: 0` and
   `Reset: 1`: the one-a-second allowance was used.
 
+## Live profiles runs (2026-11-24)
+
+Run from this cloud session with the owner's short-lived AWS credentials and user token (US tenant), in
+`antonio-org` and the sandbox account, by `./e2e.sh profiles` (owner, 2026-11-24). Six attempts; the
+first four stopped on defects of the harness, each fixed and committed (ECR's `201` on a blob chunk, the
+e2e's Terraform root lacking `snyk_profile_orgs`, a read proof cut short at 10 repositories, a re-run's
+empty preview). Every attempt's connections and role were removed by `profiles-down`.
+
+| What | Result |
+|------|--------|
+| Calls 13, 14, 16 on `closed-beta` | Work as documented: list, create (names with a label and a space accepted), delete (`204`, the connection leaves the list) |
+| Two connections in one org (FR-004) | Pass: `<registry address>` in `ap-southeast-2` and `e2e-b <registry address>` in `us-east-1` |
+| A re-run without a name (SC-007) | Pass: the same connection, nothing created |
+| A name reused for another registry (US1/AC7) | Pass: refused, naming the registry the connection reads; nothing changed |
+| Read proof, preview, and policy per connection | Pass: each on its own connection's ID |
+| `snyk_profile_orgs` (FR-016) | Pass: a create-only plan; the role trusts exactly the org, with no region key |
+| Pacing (R12) | 75 closed-beta calls in the busiest hour; no run stopped on a rate limit |
+| **L8: the projects of a deleted connection** | **Orphaned**, as Snyk's beta documentation says: a project imported at 08:42 still existed at 09:00, its target naming the connection deleted at 08:43, until it was deleted by hand. The baseline's earlier observation on `hidden` (the project gone seconds later) did not repeat |
+| **L4: one project per connection** | **Not verified.** The first connection of the day imported `snyk-e2e/app:v1.0.0` 14 seconds after its policy. No later connection imported it, including two fresh ones in an org with no leftover (10 minutes). After a connection's first sync, its preview turned from "1 to import" to "0 to import" with no project made. A targeted run (below) tells apart a memory of the repository, a memory of the image digest, and one project per repository name per org |
+| L1: repointing (call 15) | Left out by the owner for now (2026-11-24) |
+
 ## Decisions from clarification (owner, 2026-11-24)
 
 - **Scope**: several ECRs per org; the region is an attribute of a connection and orthogonal to the
@@ -540,17 +561,21 @@ file's earlier sections: Registry ADR 0096 ("Activities" item 5; "Operability", 
   e2e step checks it again after its delete (live check L8). If the projects stay, orphaned, as Snyk's
   beta documentation says, the dry run's wording and FR-014 change through Spec Kit, by owner
   decision.
+- **Live result** (L8, 2026-11-24): orphaned. FR-014 now contradicts what Snyk does, pending the owner's
+  decision. Proposed: `--delete-connection` deletes the connection's projects by provenance first, then
+  the connection, so nothing is orphaned; the e2e's cleanup already does so with `--delete-projects
+  --delete-connection`.
 - **Owner action**: ask the beta team which behavior is intended.
 
 ### Live checks before or during implementation
 
 | ID | What | How | Settles |
 |----|------|-----|---------|
-| L1 | The documented `PATCH` changes a connection's region and role ARN, and renames it, on a connection the e2e created | The `profiles` e2e step | R4, call 15 |
+| L1 | The documented `PATCH` changes a connection's region and role ARN, and renames it, on a connection the e2e created (**left out** by the owner, 2026-11-24) | The `profiles` e2e step | R4, call 15 |
 | L2 | How an ECR connection made through v1 on a flagged org appears, and what works on it. Left out of the e2e: it needs a v1 create on a flagged org and cannot be removed through the API | Optional, by hand, once, on a throwaway org | R6 |
 | L3 | The closed-beta list's answer for an org ID that does not exist (**done**, 2026-11-24: `404` `Endpoint Not Found`) and for a token without access (not tried) | Read-only probes | R1 |
-| L4 | Two connections holding the same repository give one target each | The `profiles` e2e step | R5, SC-003 |
+| L4 | Two connections holding the same repository give one target each (**not verified**, 2026-11-24: see "Live profiles runs") | The `profiles` e2e step | R5, SC-003 |
 | L5 | The closed-beta calls with an org service account's token, including the mode check on a default-mode org: a `401` or `403` there would stop default-mode runs made with such a token | Optional re-runs of the `single` and `profiles` steps | R1, R11 |
 | L6 | The closed-beta list with a token at version `2024-10-15` (**done**, 2026-11-24: `200` on a flagged org, `404` `Endpoint Not Found` on an unflagged one); the form of `links.next` is still unseen | The owner's read-only probe | R1, R2, R12 |
 | L7 | Rate-limit headers on closed-beta answers (**done**, 2026-11-24: per principal, across closed-beta APIs) | The same probe | R12 |
-| L8 | The projects of a deleted connection: gone, or left orphaned | The `profiles` e2e step | R14 |
+| L8 | The projects of a deleted connection: gone, or left orphaned (**done**, 2026-11-24: orphaned) | The `profiles` e2e step | R14 |
