@@ -270,6 +270,7 @@ file's earlier sections: Registry ADR 0096 ("Activities" item 5; "Operability", 
   only through it; no publication date was found. Without it there is no profiles mode.
 - **Alternatives**: waiting for publication (no date); Snyk's UI (out of scope, owner; not
   automatable). **Owner action**: ask the beta team whether and when the API will be published.
+- **Approved** by the owner on 2026-11-24, with the conditions above.
 
 ### R3. Finding a connection (FR-004, FR-005, FR-006)
 
@@ -336,7 +337,7 @@ file's earlier sections: Registry ADR 0096 ("Activities" item 5; "Operability", 
   in implementation with `terraform test`. The module is unchanged: `snyk_org_ids` is already
   independent of regions.
 - **Rationale**: an org already in either input needs no AWS change to connect another ECR (FR-016,
-  SC-005), and default-mode inputs behave as before (FR-017).
+  SC-005), and default-mode inputs behave as before (FR-017). Chosen by the owner on 2026-11-24.
 - **Alternatives**: no change, listing a profiles-mode org under any one of its regions (misleading
   keys); replacing the map with a plain list (breaks the region-to-org pairs default mode passes to
   the script).
@@ -359,7 +360,7 @@ file's earlier sections: Registry ADR 0096 ("Activities" item 5; "Operability", 
   no ECR connection. The step connects the fixture's two registries (the same image in two regions),
   names its connections, and deletes only the ones it created. Today only `antonio-org` has the flag,
   and it holds 60 other projects; a throwaway org with the flag is safer. **Owner action**: ask the
-  beta team for one.
+  beta team for one. The owner chose `antonio-org` for now, under these guards (2026-11-24).
 
 ### R11. Token permissions for the hidden calls
 

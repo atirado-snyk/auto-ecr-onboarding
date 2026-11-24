@@ -17,15 +17,17 @@ repository names. On the AWS side the module already trusts orgs without regard 
 example root gains one optional input so an account read only by profiles-mode orgs needs no region
 keys.
 
-## Decisions this plan needs from the owner
+## Owner decisions (2026-11-24)
 
-1. **Approve the one exception to the constitution** (Principle IV): the profiles calls use Snyk's
-   unpublished `hidden` integrations API. See [Complexity Tracking](#complexity-tracking). Worth
-   asking the beta team whether it will be published.
-2. **The Terraform input** for orgs that read an account in any region: `snyk_profile_orgs`, beside
-   the region-to-org map ([research R8](research.md#r8-account-access-without-regions-fr-016-fr-017-question-7)).
-3. **Where the live test runs**: `antonio-org`, the only org with the flag today, or a throwaway org
-   the beta team enables ([research R10](research.md#r10-where-the-profile-mode-live-test-runs)).
+1. **The one exception to the constitution is approved** (Principle IV), with its conditions: the
+   profiles calls use Snyk's unpublished `hidden` integrations API. See
+   [Complexity Tracking](#complexity-tracking). Open action: ask the beta team whether and when the
+   API will be published.
+2. **The Terraform input is `snyk_profile_orgs`**, beside the region-to-org map
+   ([research R8](research.md#r8-account-access-without-regions-fr-016-fr-017-question-7)).
+3. **The live test runs on `antonio-org` for now**, under the harness's guards, and moves to a
+   throwaway org if the beta team enables one
+   ([research R10](research.md#r10-where-the-profile-mode-live-test-runs)).
 
 ## Technical Context
 
@@ -77,7 +79,7 @@ v2.0.0.
 | Invariant: least privilege | Unchanged | Pass | No change to the role's permissions |
 | Invariant: API split by mode | v1 only in default mode; connections only through the integrations API in profiles mode; REST for the rest | Pass | [contracts/snyk-api.md](contracts/snyk-api.md#changed-calls) |
 
-**Gate**: passes, with one violation justified below and awaiting the owner's approval.
+**Gate**: passes, with one violation justified below and approved by the owner on 2026-11-24.
 
 **Post-design re-check**: unchanged after Phase 1.
 
@@ -221,7 +223,7 @@ hidden calls kept together so they can be swapped for a published API in one pla
 |-----------|------------|-------------------------------------|
 | Principle IV: calls 13 to 17 use Snyk's unpublished `hidden` integrations API (version `2024-10-15`), whose request shapes are in no published spec | It is the only API that lists, creates, repoints, and deletes profiles. The v1 API sees one ECR integration per org, which is the limitation this feature removes (baseline FR-016) | Waiting for a published API: no date was found in Snyk's material (2026-11-24). Snyk's UI: out of scope (owner) and not scriptable |
 
-**Conditions attached to the exception**, taken from Principle IV's own clause for undocumented
+**Approved** by the owner on 2026-11-24. **Conditions attached to the exception**, taken from Principle IV's own clause for undocumented
 behavior: the calls live together in one section of `SnykClient`; the docs and
 [contracts/snyk-api.md](contracts/snyk-api.md) mark them as undocumented; each is verified live before
 release, and call 16 is not shipped until live check L1 settles its body; the API version is pinned;
