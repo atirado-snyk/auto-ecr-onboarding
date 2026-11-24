@@ -33,6 +33,25 @@ it (Phase 0). Sources are Snyk-internal unless marked public.
   came from, and saving an import policy in the UI failed with "Integration ID is required" (worked
   around through the API). (Slack, July 2026.)
 
+## Observed in the Snyk UI (owner, 2026-11-24)
+
+- **The UI has profile management.** "Create new ECR profile" asks for a profile name ("A unique name
+  to identify this specific connection profile"), a region, and a role ARN: the same three fields the
+  spec models for a named connection.
+- **Creating a profile with a role that does not exist failed** with a generic "Failed to create
+  profile." (role `arn:aws:iam::123456789012:role/snyk-ecr-read`, AWS's documentation placeholder
+  account; region `us-west-2`). If the role is the cause, the profiles create checks access before it
+  saves, unlike the v1 create, which does not (baseline research, D6). Then a create right after a new
+  role is made can fail while IAM propagates, and the tool must retry it. Not yet confirmed: the
+  message does not name the cause.
+- **The name `this.is.a-test:1234567890/abc` drew no field error** in the form, so the UI does not
+  restrict dots, hyphens, colons, or slashes before submitting. Whether Snyk's server accepts such a
+  name is **unproven**: the request failed, possibly before the name was checked.
+- **Next observations**: the failed request's response body, from the browser's developer tools,
+  would name the failing check and show the API call's path, version, and body (questions 2 and 8).
+  A create with a real, trusted role and the default name format, followed by a delete, would prove
+  the name.
+
 ## Decisions from clarification (owner, 2026-11-24)
 
 - **Scope**: several ECRs per org; the region is an attribute of a connection and orthogonal to the

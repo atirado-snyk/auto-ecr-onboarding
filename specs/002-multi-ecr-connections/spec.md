@@ -323,9 +323,9 @@ Changes to the baseline's entities:
 
 - **Snyk enables the feature per customer.** It is a closed beta, for ECR, offered to Enterprise
   customers; engineers cannot turn it on themselves.
-- **Connections in profiles mode are managed through Snyk's API.** Snyk's enablement material says the
-  UI's registry configuration is removed for these orgs, with UI support planned for June 2026;
-  whether it has shipped is unconfirmed.
+- **The tool manages connections in profiles mode through Snyk's API.** Snyk's UI also offers "Create
+  new ECR profile" with the same fields (name, region, role ARN), observed on 2026-11-24, so
+  connections made either way are the same kind of object.
 - **Snyk keeps a record of which connection imported each project**, at least internally. Whether its
   public API exposes it decides FR-011 and FR-013, and is the first question for planning
   ([research](research.md), item 1).
